@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enterprise Attendance System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/style.css?v=2.0">
+    <script src="/static/app.js?v=2.1" defer></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen font-sans">
+    <div class="container mx-auto p-4 max-w-6xl">
+        <header class="mb-8 flex justify-between items-center border-b border-slate-700 pb-4 mt-4">
+            <div>
+                <h1 class="text-3xl font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">Enterprise Attendance AI</h1>
+                <p class="text-slate-400 text-sm mt-1">FAISS Vector Engine • 3-Frame Consensus</p>
+            </div>
+            <div class="flex items-center gap-4">
+                <a href="/logs" download class="px-4 py-2 rounded-lg text-sm font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors shadow-lg shadow-emerald-500/30 flex items-center gap-2">
+                    <span>📥</span> Download Logs
+                </a>
+                <button id="add-student-btn" class="px-4 py-2 rounded-lg text-sm font-bold bg-blue-600 hover:bg-blue-500 text-white transition-colors shadow-lg shadow-blue-500/30">
+                    + Add Student
+                </button>
+                <div id="status-badge" class="px-4 py-2 rounded-full text-sm font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/50">
+                    🟡 Connecting...
+                </div>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Video Feed Column -->
+            <div class="lg:col-span-2 space-y-4">
+                <div class="glass rounded-2xl overflow-hidden shadow-2xl relative">
+                    <video id="videoElement" autoplay playsinline class="w-full h-auto transform -scale-x-100 object-cover aspect-video bg-black"></video>
+                    <canvas id="canvasElement" class="hidden"></canvas>
+                    <canvas id="overlayCanvas" class="absolute top-0 left-0 w-full h-full pointer-events-none"></canvas>
+                    
+                    <!-- Registration Overlay (Hidden by default) -->
+                    <div id="reg-overlay" class="absolute inset-0 bg-black/80 hidden flex flex-col items-center justify-center z-20 backdrop-blur-sm">
+                        <div class="w-64 h-64 border-4 border-dashed border-blue-500 rounded-full mb-4 relative">
+                            <div class="absolute inset-0 bg-blue-500/20 rounded-full animate-pulse"></div>
+                        </div>
+                        <h2 id="reg-instruction" class="text-2xl font-bold text-white mb-2">Look Straight</h2>
+                        <p id="reg-subtext" class="text-blue-400 text-sm">Capturing frame 0 / 10</p>
+                    </div>
+                </div>
+                
+                <div class="glass p-4 rounded-xl">
+                    <h3 class="text-sm font-semibold text-slate-300 mb-2">System Metrics</h3>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                        <div class="bg-slate-800/50 rounded-lg p-2 border border-slate-700">
+                            <div class="text-xs text-slate-400">Camera FPS</div>
+                            <div id="fps-counter" class="text-lg font-mono text-emerald-400">0</div>
+                        </div>
+                        <div class="bg-slate-800/50 rounded-lg p-2 border border-slate-700">
+                            <div class="text-xs text-slate-400">Backend Status</div>
+                            <div id="ws-status" class="text-lg font-mono text-slate-300">Idle</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Debug Row -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="bg-black/80 p-3 rounded-xl border border-slate-700 font-mono text-xs overflow-hidden h-40 flex flex-col">
+                        <div class="text-slate-500 border-b border-slate-800 pb-1 mb-1 flex justify-between">
+                            <span>>_ BACKEND_TERMINAL</span>
+                            <span class="animate-pulse">_</span>
+                        </div>
+                        <div id="terminal-logs" class="flex-1 overflow-y-auto text-slate-300 space-y-1 custom-scrollbar flex flex-col justify-end"></div>
+                    </div>
+                    
+                    <div class="glass p-3 rounded-xl flex flex-col h-40">
+                        <div class="text-[10px] text-amber-400 uppercase tracking-widest font-bold border-b border-slate-700/50 pb-1 mb-2 flex justify-between">
+                            <span>👁️ AI Eye (Live Crops)</span>
+                            <span id="crop-count" class="text-slate-500">0 faces</span>
+                        </div>
+                        <div id="debug-crops" class="flex-1 flex gap-2 overflow-x-auto items-center pb-2 custom-scrollbar">
+                            <div class="text-xs text-slate-600 italic">Waiting for detection...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Attendance Log Column -->
+            <div class="space-y-6">
+                <div class="glass rounded-2xl p-6 shadow-2xl flex flex-col h-[300px]">
+                    <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
+                        <span>🟢</span> Live Presence
+                    </h2>
+                    <div id="attendance-list" class="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                        <div class="text-center text-slate-500 mt-10 text-sm">Camera is empty.</div>
+                    </div>
+                </div>
+
+                <div class="glass rounded-2xl p-6 shadow-2xl flex flex-col h-[400px]">
+                    <h2 class="text-xl font-bold mb-4 flex items-center gap-2 text-emerald-400">
+                        <span>✅</span> Confirmed Attendance
+                    </h2>
+                    <div id="confirmed-list" class="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                        <div class="text-center text-slate-500 mt-10 text-sm">No one confirmed yet.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Registration Modal -->
+    <div id="modal-backdrop" class="fixed inset-0 bg-black/90 z-50 hidden flex items-center justify-center backdrop-blur-md">
+        <div class="bg-slate-800 border border-slate-700 rounded-2xl p-8 max-w-md w-full shadow-2xl transform scale-95 transition-transform duration-300" id="modal-content">
+            <h2 class="text-2xl font-bold text-white mb-2">Register New Student</h2>
+            <p class="text-slate-400 text-sm mb-6">Enter the exact name. You will be asked to move your head to build a 3D-aware profile.</p>
+            
+            <input type="text" id="student-name-input" placeholder="e.g. John Doe" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 mb-6">
+            
+            <div class="flex justify-end gap-3">
+                <button id="cancel-btn" class="px-4 py-2 rounded-lg text-sm font-semibold text-slate-300 hover:text-white hover:bg-slate-700 transition-colors">Cancel</button>
+                <button id="start-scan-btn" class="px-6 py-2 rounded-lg text-sm font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors shadow-lg shadow-emerald-500/30">Start Scan</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

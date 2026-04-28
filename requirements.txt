@@ -1,0 +1,23 @@
+# Core Backend
+fastapi==0.104.1
+uvicorn[standard]==0.24.0.post1
+websockets==12.0
+python-multipart==0.0.6
+jinja2==3.1.2
+aiofiles==23.2.1
+
+# AWS SDK
+boto3==1.34.0
+python-dotenv==1.0.0
+
+# Image Processing (Lightweight)
+opencv-python-headless==4.11.0.86
+numpy==1.26.4
+pandas
+
+# 🚀 YOLOv8 Face Detection (LOCAL - saves 75% AWS costs!)
+# For HF Spaces T4 GPU: runs face detection locally (40ms, 97% accurate)
+# Only sends to AWS when face confirmed
+ultralytics==8.0.239
+torch==2.0.1
+torchvision==0.15.2
