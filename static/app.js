@@ -524,3 +524,28 @@ function renderLoop() {
 
 connectWebSocket();
 startCamera();
+// --- DELETE ALL FACES HANDLER ---
+document.getElementById('delete-all-btn').addEventListener('click', async () => {
+    if (!confirm('?? WARNING: This will permanently delete ALL registered face embeddings from AWS Rekognition. This cannot be undone. Are you absolutely sure?')) {
+        return;
+    }
+    
+    logToTerminal('?? Requesting AWS Collection Wipe...');
+    try {
+        const response = await fetch('/delete_faces', { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.success) {
+            logToTerminal('? SUCCESS: AWS Collection wiped clean.');
+            alert('Successfully deleted all face embeddings.');
+            confirmedPeople.clear();
+            confirmedList.innerHTML = '<div class="text-center text-slate-500 mt-10 text-sm">No one confirmed yet.</div>';
+        } else {
+            logToTerminal('? ERROR: ' + data.message);
+            alert('Failed to delete faces: ' + data.message);
+        }
+    } catch (err) {
+        logToTerminal('? NETWORK ERROR: ' + err.message);
+        alert('Network error occurred.');
+    }
+});

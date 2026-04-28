@@ -50,46 +50,17 @@ def register_face_to_aws(image_bytes, name):
     except Exception as e:
         return False, str(e)
 
-def search_face_on_aws(image_bytes):
-    """Searches AWS for the faces in the image."""
-    if not rekognition: return []
-    
+def delete_all_faces():
+    """Deletes the entire collection and recreates it to wipe all face embeddings."""
+    if not rekognition: return False, "AWS not configured"
     try:
-        # AWS can search up to 100 faces in a single API call!
-        response = rekognition.search_faces_by_image(
-            CollectionId=COLLECTION_ID,
-            Image={'Bytes': image_bytes},
-            MaxFaces=1, 
-            FaceMatchThreshold=MATCH_THRESHOLD
-        )
-        
-        results = []
-        # Check if AWS found a match
-        if len(response['FaceMatches']) > 0:
-            match = response['FaceMatches'][0]
-            confidence = match['Similarity']
-            name = match['Face']['ExternalImageId']
-            
-            # Get the bounding box from the searched face
-            bbox = response['SearchedFaceBoundingBox']
-            
-            results.append({
-                "status": "match",
-                "name": name,
-                "score": round(confidence, 1),
-                "aws_box": bbox # AWS returns normalized coordinates (0.0 to 1.0)
-            })
-        else:
-            # Face found but no match
-            if 'SearchedFaceBoundingBox' in response:
-                results.append({
-                    "status": "unknown",
-                    "name": "Unknown",
-                    "score": 0,
-                    "aws_box": response['SearchedFaceBoundingBox']
-                })
-                
-        return results
+        print(f"🔥 Deleting collection '{COLLECTION_ID}'...")
+        rekognition.delete_collection(CollectionId=COLLECTION_ID)
+        rekognition.create_collection(CollectionId=COLLECTION_ID)
+        print(f"✨ Collection '{COLLECTION_ID}' recreated (clean start).")
+        return True, "All faces deleted successfully."
+    except rekognition.exceptions.ResourceNotFoundException:
+        rekognition.create_collection(CollectionId=COLLECTION_ID)
+        return True, "Collection was already empty."
     except Exception as e:
-        # Happens if no face is in the image at all
-        return []
+        return False, str(e)

@@ -13,7 +13,7 @@ import uvicorn
 from core.config import LOG_FILE
 from core.state import attendance_memory
 from api.websocket import websocket_endpoint
-from services.aws_client import ensure_collection_exists
+from services.aws_client import ensure_collection_exists, delete_all_faces
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -73,3 +73,7 @@ async def download_logs():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=7860)
+@app.post("/delete_faces")
+async def wipe_faces():
+    success, message = delete_all_faces()
+    return {"success": success, "message": message}
