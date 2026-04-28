@@ -3,7 +3,6 @@ from botocore.exceptions import ClientError
 from core.config import AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, COLLECTION_ID, MATCH_THRESHOLD
 
 # Initialize Boto3 Client
-# We must check if keys exist to prevent crashing on startup without an .env file
 if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY:
     rekognition = boto3.client(
         'rekognition',
@@ -36,9 +35,9 @@ def register_face_to_aws(image_bytes, name):
         response = rekognition.index_faces(
             CollectionId=COLLECTION_ID,
             Image={'Bytes': image_bytes},
-            ExternalImageId=name, # We use the name as the AWS External ID
+            ExternalImageId=name,
             MaxFaces=1,
-            QualityFilter="AUTO", # AWS automatically rejects blurry faces
+            QualityFilter="AUTO",
             DetectionAttributes=['DEFAULT']
         )
         
@@ -50,17 +49,55 @@ def register_face_to_aws(image_bytes, name):
     except Exception as e:
         return False, str(e)
 
+def search_face_on_aws(image_bytes):
+    """Searches AWS for the faces in the image."""
+    if not rekognition: return []
+    
+    try:
+        response = rekognition.search_faces_by_image(
+            CollectionId=COLLECTION_ID,
+            Image={'Bytes': image_bytes},
+            MaxFaces=1, 
+            FaceMatchThreshold=MATCH_THRESHOLD
+        )
+        
+        results = []
+        if len(response['FaceMatches']) > 0:
+            match = response['FaceMatches'][0]
+            confidence = match['Similarity']
+            name = match['Face']['ExternalImageId']
+            bbox = response['SearchedFaceBoundingBox']
+            
+            results.append({
+                "status": "match",
+                "name": name,
+                "score": round(confidence, 1),
+                "aws_box": bbox
+            })
+        else:
+            if 'SearchedFaceBoundingBox' in response:
+                results.append({
+                    "status": "unknown",
+                    "name": "Unknown",
+                    "score": 0,
+                    "aws_box": response['SearchedFaceBoundingBox']
+                })
+                
+        return results
+    except Exception as e:
+        return []
+
 def delete_all_faces():
     """Deletes the entire collection and recreates it to wipe all face embeddings."""
     if not rekognition: return False, "AWS not configured"
     try:
         print(f"🔥 Deleting collection '{COLLECTION_ID}'...")
-        rekognition.delete_collection(CollectionId=COLLECTION_ID)
+        try:
+            rekognition.delete_collection(CollectionId=COLLECTION_ID)
+        except rekognition.exceptions.ResourceNotFoundException:
+            pass
         rekognition.create_collection(CollectionId=COLLECTION_ID)
         print(f"✨ Collection '{COLLECTION_ID}' recreated (clean start).")
         return True, "All faces deleted successfully."
-    except rekognition.exceptions.ResourceNotFoundException:
-        rekognition.create_collection(CollectionId=COLLECTION_ID)
-        return True, "Collection was already empty."
     except Exception as e:
         return False, str(e)
