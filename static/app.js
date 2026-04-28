@@ -201,7 +201,6 @@ function drawSmoothFaces() {
         face.currentBox.h += (face.targetBox.h - face.currentBox.h) * LERP_FACTOR;
 
         let { x, y, w, h } = face.currentBox;
-        const mirroredX = overlayCanvas.width - x - w;
         
         let color = '#ef4444'; 
         if (face.status === 'match') color = '#10b981'; 
@@ -210,7 +209,7 @@ function drawSmoothFaces() {
         
         const alpha = age > 200 ? Math.max(0, 1 - ((age - 200) / 800)) : 1;
         
-        drawHighTechCorners(overlayCtx, mirroredX, y, w, h, color, alpha);
+        drawHighTechCorners(overlayCtx, x, y, w, h, color, alpha);
         
         overlayCtx.globalAlpha = alpha;
         const labelText = `${face.name} ${face.score > 0 ? '(' + face.score + '%)' : ''}`;
@@ -218,10 +217,10 @@ function drawSmoothFaces() {
         const textWidth = overlayCtx.measureText(labelText).width;
         
         overlayCtx.fillStyle = '#000000AA';
-        overlayCtx.fillRect(mirroredX, y > 30 ? y - 25 : y + h + 5, textWidth + 10, 20);
+        overlayCtx.fillRect(x, y > 30 ? y - 25 : y + h + 5, textWidth + 10, 20);
         
         overlayCtx.fillStyle = color;
-        overlayCtx.fillText(labelText, mirroredX + 5, y > 30 ? y - 10 : y + h + 19);
+        overlayCtx.fillText(labelText, x + 5, y > 30 ? y - 10 : y + h + 19);
         
         overlayCtx.globalAlpha = 1.0;
     }
