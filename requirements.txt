@@ -20,4 +20,4 @@ pandas
 # Only sends to AWS when face confirmed
 ultralytics==8.0.239
 torch==2.0.1
-torchvision==0.15.2
+torchvision==0.15.2mediapipe
