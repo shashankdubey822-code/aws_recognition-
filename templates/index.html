@@ -34,8 +34,8 @@
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <!-- Video Feed Column -->
             <div class="lg:col-span-2 space-y-4">
-                <div class="glass rounded-2xl overflow-hidden shadow-2xl relative transform -scale-x-100">
-                    <video id="videoElement" autoplay playsinline class="w-full h-auto object-cover aspect-video bg-black"></video>
+                <div class="glass rounded-2xl overflow-hidden shadow-2xl relative">
+                    <video id="videoElement" autoplay playsinline class="w-full h-auto transform -scale-x-100 object-cover aspect-video bg-black"></video>
                     <canvas id="canvasElement" class="hidden"></canvas>
                     <canvas id="overlayCanvas" class="absolute top-0 left-0 w-full h-full pointer-events-none"></canvas>
                     
