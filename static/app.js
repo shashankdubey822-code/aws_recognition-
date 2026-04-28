@@ -91,7 +91,8 @@ cancelBtn.addEventListener('click', () => {
 });
 
 startScanBtn.addEventListener('click', () => {
-    const name = studentNameInput.value.trim().replace(/[^a-zA-Z0-9_ -]/g, '_');
+    // Replace spaces and special characters with underscores for AWS compatibility
+    const name = studentNameInput.value.trim().replace(/ /g, '_').replace(/[^a-zA-Z0-9_.\-:]/g, '_');
     if (!name) {
         alert("Please enter a valid name.");
         return;

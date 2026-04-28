@@ -31,11 +31,15 @@ def register_face_to_aws(image_bytes, name):
     """Sends an image to AWS to be indexed under the given name."""
     if not rekognition: return False, "AWS not configured"
     
+    # AWS ExternalImageId does not allow spaces. 
+    # Regex allowed: [a-zA-Z0-9_.\-:]+
+    safe_name = name.replace(" ", "_")
+    
     try:
         response = rekognition.index_faces(
             CollectionId=COLLECTION_ID,
             Image={'Bytes': image_bytes},
-            ExternalImageId=name,
+            ExternalImageId=safe_name,
             MaxFaces=1,
             QualityFilter="AUTO",
             DetectionAttributes=['DEFAULT']
