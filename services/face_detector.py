@@ -6,33 +6,36 @@ Saves 75% AWS costs by only sending confirmed faces
 import os
 import cv2
 import numpy as np
-import mediapipe as mp
 
-# Initialize MediaPipe Face Detection
+# Initialize MediaPipe Face Detection with heavy error handling
+face_detection = None
 try:
-    import mediapipe.python.solutions.face_detection as mp_face_detection
+    import mediapipe as mp
+    # Try multiple import styles for different environments
+    if hasattr(mp, 'solutions'):
+        mp_face_detection = mp.solutions.face_detection
+    else:
+        import mediapipe.python.solutions.face_detection as mp_face_detection
+        
     face_detection = mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
-except (AttributeError, ImportError):
-    mp_face_detection = mp.solutions.face_detection
-    face_detection = mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
-
-print("✅ MediaPipe Face Detection loaded")
+    print("✅ MediaPipe Face Detection loaded successfully")
+except Exception as e:
+    print(f"⚠️ MediaPipe load failed: {e}. Falling back to AWS-only detection.")
+    face_detection = None
 
 def detect_faces_local(image_bytes):
     """
     Local face detection (FREE, no AWS cost) using MediaPipe
-    
-    Args:
-        image_bytes: Raw image data (JPEG)
-    
-    Returns:
-        {
-            "faces_found": 2,
-            "confidence": [0.98, 0.95],
-            "boxes": [{"x1": 10, "y1": 10, "x2": 50, "y2": 50, "confidence": 0.98}],
-            "should_send_to_aws": True
-        }
+    If MediaPipe is not available, defaults to True to ensure system works.
     """
+    if face_detection is None:
+        # Fallback: Always send to AWS if local detection is broken
+        return {
+            "faces_found": 1, 
+            "should_send_to_aws": True, 
+            "info": "mediapipe_unavailable_fallback"
+        }
+
     try:
         # Decode image
         nparr = np.frombuffer(image_bytes, np.uint8)
@@ -84,9 +87,9 @@ def detect_faces_local(image_bytes):
         return faces_data
         
     except Exception as e:
-        print(f"❌ Face detection error: {e}")
+        print(f"❌ Face detection runtime error: {e}")
         return {
-            "faces_found": 0,
-            "should_send_to_aws": True,  # Fallback: still send to AWS
+            "faces_found": 1,
+            "should_send_to_aws": True,
             "error": str(e)
         }

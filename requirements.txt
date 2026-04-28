@@ -14,7 +14,7 @@ python-dotenv==1.0.0
 opencv-python-headless==4.11.0.86
 numpy==1.26.4
 pandas
-mediapipe
+mediapipe==0.10.11
 
 # 🚀 YOLOv8 Face Detection (LOCAL - saves 75% AWS costs!)
 ultralytics==8.0.239
