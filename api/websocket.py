@@ -62,6 +62,32 @@ async def websocket_endpoint(websocket: WebSocket):
                         continue
 
                     name = registration_sessions[websocket]["name"]
+                    
+                    if registration_sessions[websocket].get("frames", 0) == 0:
+                        duplicate_check = await asyncio.wait_for(
+                            asyncio.to_thread(search_face_on_aws, image_bytes),
+                            timeout=8.0
+                        )
+                        if duplicate_check and len(duplicate_check) > 0:
+                            match = duplicate_check[0]
+                            existing_name = match.get("name", "Unknown")
+                            similarity = match.get("score", 0)
+                            
+                            if existing_name != "Unknown":
+                                if existing_name.lower() == name.lower():
+                                    await websocket.send_json({
+                                        "type": "registration_error",
+                                        "message": f"⚠️ '{name}' is already registered in the system."
+                                    })
+                                else:
+                                    await websocket.send_json({
+                                        "type": "registration_error",
+                                        "message": f"⚠️ This face matches '{existing_name}' ({similarity}% similarity). Use different face."
+                                    })
+                                if websocket in registration_sessions:
+                                    del registration_sessions[websocket]
+                                continue
+
                     success, msg = await asyncio.wait_for(
                         asyncio.to_thread(register_face_to_aws, image_bytes, name),
                         timeout=10.0
@@ -109,44 +135,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     session_data = registration_sessions[websocket]
                     name = session_data["name"]
 
-                    await asyncio.sleep(3.0)
-
-                    if session_data["validated_faces"]:
-                        duplicate_check = await asyncio.wait_for(
-                            asyncio.to_thread(search_face_on_aws, session_data["validated_faces"][0]),
-                            timeout=8.0
-                        )
-
-                        if duplicate_check and len(duplicate_check) > 0:
-                            match = duplicate_check[0]
-                            existing_name = match.get("name", "Unknown")
-                            similarity = match.get("score", 0)
-
-                            if existing_name.lower() == name.lower():
-                                await websocket.send_json({
-                                    "type": "registration_error",
-                                    "message": f"⚠️ '{name}' is already registered in the system."
-                                })
-                            else:
-                                await websocket.send_json({
-                                    "type": "registration_error",
-                                    "message": f"⚠️ This face matches '{existing_name}' ({similarity}% similarity). Use different face."
-                                })
-                        else:
-                            await websocket.send_json({
-                                "type": "registration_success",
-                                "message": f"✅ '{name}' successfully registered!"
-                            })
-                    else:
-                        await websocket.send_json({
-                            "type": "registration_success",
-                            "message": f"✅ '{name}' successfully registered!"
-                        })
-
-                except asyncio.TimeoutError:
                     await websocket.send_json({
-                        "type": "registration_error",
-                        "message": "Verification timeout. Student may still be registered."
+                        "type": "registration_success",
+                        "message": f"✅ '{name}' successfully registered!"
                     })
                 except Exception as e:
                     print(f"Finish registration error: {e}")
@@ -235,7 +226,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
 
                         if status == "match":
-                            status_db, time_str = mark_attendance(name)
+                            status_db, time_str = await asyncio.to_thread(mark_attendance, name)
                             results_summary.append(f"✅ {name} ({score}%)")
 
                             await websocket.send_json({
