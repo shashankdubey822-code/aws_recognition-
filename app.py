@@ -3,7 +3,7 @@ import asyncio
 import pandas as pd
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
@@ -11,7 +11,7 @@ import uvicorn
 
 # Custom Modules
 from core.config import LOG_FILE
-from core.state import attendance_memory
+from core.state import attendance_memory, PRESENT_IDENTITIES, last_seen, temporal_memory
 from api.websocket import websocket_endpoint
 from services.aws_client import ensure_collection_exists, delete_all_faces
 
@@ -23,9 +23,7 @@ async def lifespan(app: FastAPI):
     try:
         ensure_collection_exists()
     except Exception as e:
-        # 🔧 FIX #3: DON'T SWALLOW ERRORS! Log them!
         print(f"❌ CRITICAL ERROR during AWS init: {e}")
-        print(f"   Check your AWS credentials in .env file")
         # Still let app start but with warning
         print(f"   App starting in degraded mode (face detection DISABLED)")
 
@@ -41,7 +39,6 @@ async def lifespan(app: FastAPI):
             print(f"✅ Created new attendance log: {LOG_FILE}")
     except Exception as e:
         print(f"⚠️ WARNING: Could not load attendance logs: {e}")
-        print(f"   Starting with empty attendance memory")
     
     yield
     # --- SHUTDOWN PHASE ---
@@ -57,8 +54,6 @@ templates = Jinja2Templates(directory="templates")
 # Register the websocket route
 app.add_api_websocket_route("/ws", websocket_endpoint)
 
-from fastapi.responses import HTMLResponse, FileResponse
-
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
     """Serves the main application dashboard."""
@@ -71,9 +66,20 @@ async def download_logs():
         return FileResponse(LOG_FILE, media_type='text/csv', filename="attendance_log.csv")
     return {"error": "Attendance log not found yet. Mark some attendance first!"}
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=7860)
 @app.post("/delete_faces")
 async def wipe_faces():
+    """Trigger Full System Reset: AWS + Local Memory + Local Logs."""
     success, message = delete_all_faces()
-    return {"success": success, "message": message}
+    if success:
+        attendance_memory.clear()
+        PRESENT_IDENTITIES.clear()
+        last_seen.clear()
+        temporal_memory.clear()
+        try:
+            with open(LOG_FILE, "w") as f: f.write("Name,Time\n")
+        except: pass
+        return {"success": True, "message": "Full system reset complete."}
+    return {"success": False, "message": message}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=7860)
