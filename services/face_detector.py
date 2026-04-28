@@ -9,9 +9,13 @@ import numpy as np
 import mediapipe as mp
 
 # Initialize MediaPipe Face Detection
-mp_face_detection = mp.solutions.face_detection
-# model_selection=0 for short-range (up to 2m), 1 for full-range (up to 5m)
-face_detection = mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
+try:
+    import mediapipe.python.solutions.face_detection as mp_face_detection
+    face_detection = mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
+except (AttributeError, ImportError):
+    mp_face_detection = mp.solutions.face_detection
+    face_detection = mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
+
 print("✅ MediaPipe Face Detection loaded")
 
 def detect_faces_local(image_bytes):
