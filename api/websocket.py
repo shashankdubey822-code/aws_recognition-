@@ -26,7 +26,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 registration_sessions[websocket] = {"name": name, "frames": 0}
                 continue
 
-            if payload.get("type") == "register_frame":
+            if (payload.get("type") == "register_frame"):
                 if websocket not in registration_sessions: continue
                 session = registration_sessions[websocket]
                 if session["frames"] >= 10: continue
@@ -38,6 +38,18 @@ async def websocket_endpoint(websocket: WebSocket):
                 if not faces:
                     await websocket.send_json({"type": "registration_waiting", "message": "🔍 No face detected", "progress": int((session["frames"]/10)*100)})
                     continue
+
+                # --- IDENTITY GUARD: Check for duplicates before first index ---
+                if session["frames"] == 0:
+                    search_results = await asyncio.to_thread(search_face_on_aws, faces[0]["bytes"])
+                    if search_results and any(res["status"] == "match" for res in search_results):
+                        match_name = next(res["name"] for res in search_results if res["status"] == "match")
+                        await websocket.send_json({
+                            "type": "registration_error", 
+                            "message": f"❌ Identity Conflict: This person is already registered as '{match_name.replace('_', ' ')}'."
+                        })
+                        del registration_sessions[websocket]
+                        continue
 
                 success, msg = await asyncio.to_thread(register_face_to_aws, faces[0]["bytes"], session["name"])
                 if success:
