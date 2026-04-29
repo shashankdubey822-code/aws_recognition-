@@ -576,7 +576,7 @@ async function startCamera() {
             requestAnimationFrame(renderLoop);
         };
     } catch (err) {
-        showToast("Camera access denied", "error");
+        showToast("Camera kharab h tera", "error");
         logToTerminal("ERROR: Camera hardware unavailable.", "error");
     }
 }
