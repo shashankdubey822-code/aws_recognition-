@@ -411,6 +411,14 @@ function connectWebSocket() {
             if (data.faces && data.faces.length > 0) {
                 updateTargetFaces(data.faces);
                 if (!isRegistering) updateDebugCrops(data.faces);
+                
+                // --- FIX: Keep Presence Alive ---
+                data.faces.forEach(face => {
+                    if (face.status === 'match') {
+                        currentlyVisible[face.name] = Date.now();
+                    }
+                });
+                renderPresenceList();
             } else {
                 trackedFaces = {};
                 updateDebugCrops([]);
