@@ -16,10 +16,14 @@ def init_db():
     conn.commit()
     conn.close()
 
-# Global Runtime State
-attendance_memory = [] # For UI history
-PRESENT_IDENTITIES = {} # { "Name": last_seen_time }
-consensus_votes = {} # { "FaceID": ["Name", "Name", "Name"] } tracking votes
+# Global Runtime State (RESTORED FOR COMPATIBILITY)
+attendance_memory = [] 
+PRESENT_IDENTITIES = {} 
+last_seen = {} # Restored
+temporal_memory = {} # Restored
+
+# New Enterprise State
+consensus_votes = {} # { "FaceID": ["Name", "Name", "Name"] }
 last_known_positions = {} # { "FaceID": {"x": x, "y": y, "name": name} }
 
 init_db()
