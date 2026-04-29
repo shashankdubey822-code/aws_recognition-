@@ -95,3 +95,6 @@ def detect_faces_ultra(image_bytes):
     except Exception as e:
         print(f"Ultra Detector Error: {e}")
         return {"faces_found": 0, "error": str(e)}
+
+# Backwards compatibility alias
+detect_faces_local = detect_faces_ultra
