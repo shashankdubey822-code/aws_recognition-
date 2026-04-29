@@ -110,11 +110,11 @@ startScanBtn.addEventListener('click', () => {
     modalBackdrop.classList.add('hidden');
     regOverlay.classList.remove('hidden');
     
-    // Hide the static CSS circle we had before, we will draw on canvas now
+    // Hide the static CSS circle
     regOverlay.querySelector('.border-dashed').classList.add('hidden');
     
-    regInstruction.textContent = "Look at the Dot";
-    regSubtext.textContent = "Initializing Scanner...";
+    regInstruction.textContent = "Rotate Head Slowly";
+    regSubtext.textContent = "Mapping 3D features...";
     
     trackedFaces = {};
     overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);

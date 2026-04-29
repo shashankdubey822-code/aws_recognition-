@@ -2,6 +2,7 @@ import json
 import base64
 import time
 import asyncio
+import numpy as np
 from fastapi import WebSocket, WebSocketDisconnect
 from services.aws_client import search_face_on_aws, register_face_to_aws
 from services.attendance import mark_attendance
@@ -21,106 +22,100 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if payload.get("type") == "start_registration":
                 name = payload.get("name")
-                registration_sessions[websocket] = {"name": name, "frames": 0, "stage": "CENTER"}
+                registration_sessions[websocket] = {
+                    "name": name, 
+                    "frames": 0, 
+                    "coverage": [], # List of (yaw, pitch) tuples already captured
+                    "last_capture_time": 0
+                }
+                await websocket.send_json({"type": "registration_status", "message": "Start moving your head slowly...", "progress": 0})
                 continue
 
             if payload.get("type") == "register_frame":
                 if websocket not in registration_sessions: continue
                 session = registration_sessions[websocket]
-                if session["frames"] >= 12: continue
+                if session["frames"] >= 15: continue # Hard cap of 15 high-quality unique angles
 
                 encoded_data = payload["image"].split(',')[1]
                 image_bytes = base64.b64decode(encoded_data)
                 analysis = await asyncio.to_thread(detect_faces_ultra, image_bytes)
                 
                 if analysis["faces_found"] == 0:
-                    await websocket.send_json({"type": "registration_waiting", "message": analysis["diag"]["msg"], "progress": session["frames"]})
+                    await websocket.send_json({"type": "registration_waiting", "message": analysis["diag"]["msg"], "progress": int((session["frames"]/15)*100)})
                     continue
 
-                yaw = analysis["pose"]["yaw"] if "pose" in analysis else 0
-                is_compliant = False
-                instruction = ""
-
-                if session["stage"] == "CENTER":
-                    if -18 < yaw < 18: is_compliant = True
-                    else: instruction = "Look directly at the center dot"
-                elif session["stage"] == "LEFT":
-                    if yaw > 20: is_compliant = True
-                    else: instruction = "Turn your head LEFT"
-                elif session["stage"] == "RIGHT":
-                    if yaw < -20: is_compliant = True
-                    else: instruction = "Turn your head RIGHT"
-
-                if not is_compliant:
-                    await websocket.send_json({"type": "registration_waiting", "message": f"⏳ {instruction}", "progress": session["frames"]})
-                    continue
-
-                success, msg = await asyncio.to_thread(register_face_to_aws, image_bytes, session["name"])
-                if success:
-                    session["frames"] += 1
-                    if session["frames"] == 4: session["stage"] = "LEFT"
-                    elif session["frames"] == 8: session["stage"] = "RIGHT"
-                    await websocket.send_json({"type": "registration_status", "message": f"Captured {session['stage']} ({session['frames']}/12)", "progress": session["frames"]})
+                # --- FLUID POSE LOGIC ---
+                yaw = analysis["pose"]["yaw"]
+                # Check if this angle is "New Enough" (at least 8 degrees different from all previous)
+                is_new_angle = True
+                for prev_yaw in session["coverage"]:
+                    if abs(yaw - prev_yaw) < 8:
+                        is_new_angle = False
+                        break
+                
+                now = time.time()
+                # Throttling to 1 capture every 400ms to allow AWS processing
+                if is_new_angle and (now - session["last_capture_time"] > 0.4):
+                    success, msg = await asyncio.to_thread(register_face_to_aws, image_bytes, session["name"])
+                    if success:
+                        session["frames"] += 1
+                        session["coverage"].append(yaw)
+                        session["last_capture_time"] = now
+                        progress_pct = int((session["frames"] / 15) * 100)
+                        
+                        await websocket.send_json({
+                            "type": "registration_status", 
+                            "message": f"Mapping Neural Grid: {progress_pct}%", 
+                            "progress": progress_pct
+                        })
+                    else:
+                        await websocket.send_json({"type": "registration_waiting", "message": f"Quality Check: {msg}", "progress": int((session["frames"]/15)*100)})
                 else:
-                    await websocket.send_json({"type": "registration_waiting", "message": f"⚠️ AWS Reject: {msg}", "progress": session["frames"]})
+                    # Not a new angle, just update progress but tell user to move
+                    await websocket.send_json({
+                        "type": "registration_waiting", 
+                        "message": "Keep rotating your head slowly...", 
+                        "progress": int((session["frames"]/15)*100)
+                    })
                 continue
 
             if payload.get("type") == "finish_registration":
                 if websocket in registration_sessions:
                     name = registration_sessions[websocket]["name"]
-                    await websocket.send_json({"type": "registration_success", "message": f"✅ Profile secured for {name}!"})
+                    await websocket.send_json({"type": "registration_success", "message": f"✅ 360° Profile secured for {name}!"})
                     del registration_sessions[websocket]
                 continue
 
-            # --- RESTORED CORE ATTENDANCE LOOP ---
+            # Live Attendance Loop
             if payload.get("type") == "frame":
                 encoded_data = payload["image"].split(',')[1]
                 image_bytes = base64.b64decode(encoded_data)
-                
-                # 1. Local Detection
                 analysis = await asyncio.to_thread(detect_faces_ultra, image_bytes)
-                
                 if analysis["faces_found"] > 0:
                     now = time.time()
-                    # 2. Throttled AWS Recognition
                     if now - last_aws_call.get(websocket, 0) > 0.8:
                         last_aws_call[websocket] = now
                         report = await asyncio.to_thread(search_face_on_aws, image_bytes)
-                        
                         client_faces = []
                         if report:
                             for face in report:
-                                name = face["name"]
-                                status = face["status"]
-                                score = face["score"]
-                                
-                                # 3. Mark Attendance if matched
-                                if status == "match":
-                                    mark_status, time_str = mark_attendance(name)
-                                    await websocket.send_json({"type": "attendance", "name": name, "time": time_str or "Just Now"})
-                                
-                                # 4. Prepare box for UI
-                                b = analysis["box"] # Use the box from local detector
+                                if face["status"] == "match":
+                                    mark_attendance(face["name"])
+                                    await websocket.send_json({"type": "attendance", "name": face["name"], "time": "Just Now"})
+                                b = analysis["box"]
                                 client_faces.append({
-                                    "name": name, "score": score, "status": status,
+                                    "name": face["name"], "score": face["score"], "status": face["status"],
                                     "box": {"x": int(b["x"]*640), "y": int(b["y"]*480), "w": int(b["w"]*640), "h": int(b["h"]*480)},
-                                    "crop": f"data:image/jpeg;base64,{encoded_data}" # For AI Eye
+                                    "crop": f"data:image/jpeg;base64,{encoded_data}"
                                 })
-                            
-                            await websocket.send_json({"type": "ready", "faces": client_faces, "debug": f"Precision: {analysis['precision']}"})
+                            await websocket.send_json({"type": "ready", "faces": client_faces, "debug": "✅ System Active"})
                         else:
-                            # Face detected but AWS returned nothing (Unknown)
                             b = analysis["box"]
                             await websocket.send_json({
-                                "type": "ready", 
-                                "faces": [{"name": "Unknown", "score": 0, "status": "unknown", "box": {"x": int(b["x"]*640), "y": int(b["y"]*480), "w": int(b["w"]*640), "h": int(b["h"]*480)}}],
-                                "debug": "🎥 Unknown person detected"
+                                "type": "ready", "faces": [{"name": "Unknown", "score": 0, "status": "unknown", "box": {"x": int(b["x"]*640), "y": int(b["y"]*480), "w": int(b["w"]*640), "h": int(b["h"]*480)}}],
+                                "debug": "🎥 Unknown person"
                             })
-                    else:
-                        # Throttling - don't send faces yet to save bandwidth
-                        await websocket.send_json({"type": "ready", "faces": [], "debug": "🎥 Scanning..."})
                 else:
-                    # No face at all
                     await websocket.send_json({"type": "ready", "faces": [], "debug": analysis["diag"]["msg"]})
 
     except WebSocketDisconnect:
