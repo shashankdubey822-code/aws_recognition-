@@ -244,31 +244,37 @@ function drawGamifiedScanner() {
     currentDotX += (targetX - currentDotX) * 0.1;
     currentDotY += (targetY - currentDotY) * 0.1;
 
-    // Base glowing circle
+    // Base glowing circle (PULSE)
     regPulseAngle += 0.1;
-    const pulseRadius = 30 + Math.sin(regPulseAngle) * 5;
+    const pulseRadius = 35 + Math.sin(regPulseAngle) * 8;
     
     overlayCtx.beginPath();
     overlayCtx.arc(currentDotX, currentDotY, pulseRadius, 0, Math.PI * 2);
-    overlayCtx.fillStyle = 'rgba(59, 130, 246, 0.4)'; // Blue pulse
+    overlayCtx.fillStyle = 'rgba(0, 210, 255, 0.75)'; // Increased opacity & brighter blue
     overlayCtx.fill();
 
-    // Solid inner dot
+    // Solid inner dot (CORE with GLOW)
+    overlayCtx.shadowBlur = 20; // High intensity glow
+    overlayCtx.shadowColor = '#00d2ff';
     overlayCtx.beginPath();
-    overlayCtx.arc(currentDotX, currentDotY, 10, 0, Math.PI * 2);
-    overlayCtx.fillStyle = '#3b82f6';
+    overlayCtx.arc(currentDotX, currentDotY, 12, 0, Math.PI * 2);
+    overlayCtx.fillStyle = '#ffffff'; // White core for maximum "light" effect
     overlayCtx.fill();
+    
+    // Reset shadow so it doesn't affect other elements
+    overlayCtx.shadowBlur = 0;
 
     // Progress Arc Ring
     const progressPct = regProgress / REQUIRED_REG_FRAMES;
     if (progressPct > 0) {
         overlayCtx.beginPath();
-        overlayCtx.arc(currentDotX, currentDotY, 45, -Math.PI / 2, (-Math.PI / 2) + (Math.PI * 2 * progressPct));
-        overlayCtx.strokeStyle = '#10b981'; // Emerald progress
-        overlayCtx.lineWidth = 6;
+        overlayCtx.arc(currentDotX, currentDotY, 50, -Math.PI / 2, (-Math.PI / 2) + (Math.PI * 2 * progressPct));
+        overlayCtx.strokeStyle = '#00ff99'; // Brighter "Matrix" green
+        overlayCtx.lineWidth = 8;
         overlayCtx.lineCap = 'round';
         overlayCtx.stroke();
     }
+
     
     // Draw tracking corners around face if available
     for (const id in trackedFaces) {
