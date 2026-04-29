@@ -33,7 +33,7 @@ const VISIBILITY_TIMEOUT_MS = 8000;
 
 // --- ADVANCED GAMIFIED REGISTRATION STATE ---
 let isRegistering = false;
-const REQUIRED_REG_FRAMES = 12; // 4 center, 4 left, 4 right
+const REQUIRED_REG_FRAMES = 200; // UPGRADED TO 200 FOR HIGH ACCURACY
 let regProgress = 0;
 let regPulseAngle = 0;
 let flashAlpha = 0; // For visual capture feedback

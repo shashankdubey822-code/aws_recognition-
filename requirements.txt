@@ -6,18 +6,16 @@ python-multipart==0.0.6
 jinja2==3.1.2
 aiofiles==23.2.1
 
-# AWS SDK
-boto3==1.34.0
-python-dotenv==1.0.0
-
-# Image Processing (Lightweight)
-opencv-python-headless==4.11.0.86
+# AI & Computer Vision
+opencv-python-headless
 numpy==1.26.4
 pandas
 mediapipe==0.10.11
-
-# 🚀 YOLOv8 Face Detection (LOCAL - saves 75% AWS costs!)
-ultralytics==8.0.239
-torch==2.0.1
-torchvision==0.15.2
 scipy
+deepface
+tf-keras
+tensorflow-cpu
+
+# Utils
+python-dotenv==1.0.0
+boto3==1.34.0

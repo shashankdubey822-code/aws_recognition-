@@ -4,16 +4,16 @@ import time
 import asyncio
 import numpy as np
 from fastapi import WebSocket, WebSocketDisconnect
-from services.aws_client import search_face_on_aws, register_face_to_aws
+from services.face_detector import detect_faces_ultra, extract_embedding_512
 from services.attendance import mark_attendance
-from services.face_detector import detect_faces_ultra
+
+# LOCAL DB for 512-dim vectors (Centroid Mode)
+IDENTITY_DATABASE = {} # { "Name": np.array([512_dims]) }
 
 registration_sessions = {}
-last_aws_call = {}
 
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    last_aws_call[websocket] = 0
 
     try:
         while True:
@@ -24,99 +24,89 @@ async def websocket_endpoint(websocket: WebSocket):
                 name = payload.get("name")
                 registration_sessions[websocket] = {
                     "name": name, 
-                    "frames": 0, 
-                    "coverage": [], # List of (yaw, pitch) tuples already captured
-                    "last_capture_time": 0
+                    "embeddings": [], 
+                    "target_count": 200 # CAPTURE 200 IMAGES AS REQUESTED
                 }
-                await websocket.send_json({"type": "registration_status", "message": "Start moving your head slowly...", "progress": 0})
+                await websocket.send_json({"type": "registration_status", "message": f"Stay still. Capturing 200 neural frames...", "progress": 0})
                 continue
 
             if payload.get("type") == "register_frame":
                 if websocket not in registration_sessions: continue
                 session = registration_sessions[websocket]
-                if session["frames"] >= 15: continue # Hard cap of 15 high-quality unique angles
+                if len(session["embeddings"]) >= 200: continue
 
                 encoded_data = payload["image"].split(',')[1]
                 image_bytes = base64.b64decode(encoded_data)
-                analysis = await asyncio.to_thread(detect_faces_ultra, image_bytes)
                 
+                # 1. Detect and Extract Image
+                analysis = await asyncio.to_thread(detect_faces_ultra, image_bytes)
                 if analysis["faces_found"] == 0:
-                    await websocket.send_json({"type": "registration_waiting", "message": analysis["diag"]["msg"], "progress": int((session["frames"]/15)*100)})
+                    await websocket.send_json({"type": "registration_waiting", "message": "⚠️ Face lost. Stay in frame.", "progress": int((len(session["embeddings"])/200)*100)})
                     continue
 
-                # --- FLUID POSE LOGIC ---
-                yaw = analysis["pose"]["yaw"]
-                # Check if this angle is "New Enough" (at least 8 degrees different from all previous)
-                is_new_angle = True
-                for prev_yaw in session["coverage"]:
-                    if abs(yaw - prev_yaw) < 8:
-                        is_new_angle = False
-                        break
+                # 2. Extract 512-dim Vector (VERY FAST locally)
+                vector = await asyncio.to_thread(extract_embedding_512, analysis["raw_img"])
                 
-                now = time.time()
-                # Throttling to 1 capture every 400ms to allow AWS processing
-                if is_new_angle and (now - session["last_capture_time"] > 0.4):
-                    success, msg = await asyncio.to_thread(register_face_to_aws, image_bytes, session["name"])
-                    if success:
-                        session["frames"] += 1
-                        session["coverage"].append(yaw)
-                        session["last_capture_time"] = now
-                        progress_pct = int((session["frames"] / 15) * 100)
-                        
+                if vector is not None:
+                    session["embeddings"].append(vector)
+                    count = len(session["embeddings"])
+                    progress = int((count / 200) * 100)
+                    
+                    if count % 10 == 0: # Update UI every 10 frames for smoothness
                         await websocket.send_json({
                             "type": "registration_status", 
-                            "message": f"Mapping Neural Grid: {progress_pct}%", 
-                            "progress": progress_pct
+                            "message": f"Generating 512-dim Signature: {progress}%", 
+                            "progress": progress
                         })
-                    else:
-                        await websocket.send_json({"type": "registration_waiting", "message": f"Quality Check: {msg}", "progress": int((session["frames"]/15)*100)})
-                else:
-                    # Not a new angle, just update progress but tell user to move
-                    await websocket.send_json({
-                        "type": "registration_waiting", 
-                        "message": "Keep rotating your head slowly...", 
-                        "progress": int((session["frames"]/15)*100)
-                    })
+                    
+                    if count >= 200:
+                        # 3. Calculate Centroid (Mean of all 200 vectors)
+                        centroid = np.mean(session["embeddings"], axis=0)
+                        IDENTITY_DATABASE[session["name"]] = centroid
+                        await websocket.send_json({
+                            "type": "registration_success", 
+                            "message": f"✅ {session['name']} profile BAKED using 200 frames."
+                        })
+                        del registration_sessions[websocket]
                 continue
 
-            if payload.get("type") == "finish_registration":
-                if websocket in registration_sessions:
-                    name = registration_sessions[websocket]["name"]
-                    await websocket.send_json({"type": "registration_success", "message": f"✅ 360° Profile secured for {name}!"})
-                    del registration_sessions[websocket]
-                continue
-
-            # Live Attendance Loop
             if payload.get("type") == "frame":
+                # Live Recognition using Cosine Similarity against the local 512-dim DB
                 encoded_data = payload["image"].split(',')[1]
                 image_bytes = base64.b64decode(encoded_data)
                 analysis = await asyncio.to_thread(detect_faces_ultra, image_bytes)
+                
                 if analysis["faces_found"] > 0:
-                    now = time.time()
-                    if now - last_aws_call.get(websocket, 0) > 0.8:
-                        last_aws_call[websocket] = now
-                        report = await asyncio.to_thread(search_face_on_aws, image_bytes)
-                        client_faces = []
-                        if report:
-                            for face in report:
-                                if face["status"] == "match":
-                                    mark_attendance(face["name"])
-                                    await websocket.send_json({"type": "attendance", "name": face["name"], "time": "Just Now"})
-                                b = analysis["box"]
-                                client_faces.append({
-                                    "name": face["name"], "score": face["score"], "status": face["status"],
-                                    "box": {"x": int(b["x"]*640), "y": int(b["y"]*480), "w": int(b["w"]*640), "h": int(b["h"]*480)},
-                                    "crop": f"data:image/jpeg;base64,{encoded_data}"
-                                })
-                            await websocket.send_json({"type": "ready", "faces": client_faces, "debug": "✅ System Active"})
-                        else:
-                            b = analysis["box"]
-                            await websocket.send_json({
-                                "type": "ready", "faces": [{"name": "Unknown", "score": 0, "status": "unknown", "box": {"x": int(b["x"]*640), "y": int(b["y"]*480), "w": int(b["w"]*640), "h": int(b["h"]*480)}}],
-                                "debug": "🎥 Unknown person"
-                            })
+                    live_vector = await asyncio.to_thread(extract_embedding_512, analysis["raw_img"])
+                    
+                    best_match = "Unknown"
+                    best_score = 0
+                    
+                    if live_vector is not None:
+                        # Compare against all identities in local DB
+                        for name, master_vector in IDENTITY_DATABASE.items():
+                            # Cosine Similarity = (A . B) / (||A|| * ||B||)
+                            dot_product = np.dot(live_vector, master_vector)
+                            norm_a = np.linalg.norm(live_vector)
+                            norm_b = np.linalg.norm(master_vector)
+                            similarity = (dot_product / (norm_a * norm_b)) * 100
+                            
+                            if similarity > best_score and similarity > 75:
+                                best_score = round(similarity, 1)
+                                best_match = name
+                    
+                    if best_match != "Unknown":
+                        mark_attendance(best_match)
+                        await websocket.send_json({"type": "attendance", "name": best_match, "time": "Just Now"})
+
+                    b = analysis["box"]
+                    client_faces = [{
+                        "name": best_match, "score": best_score, "status": "match" if best_match != "Unknown" else "unknown",
+                        "box": {"x": int(b["x"]*640), "y": int(b["y"]*480), "w": int(b["w"]*640), "h": int(b["h"]*480)}
+                    }]
+                    await websocket.send_json({"type": "ready", "faces": client_faces, "debug": f"Match: {best_match} ({best_score}%)"})
                 else:
-                    await websocket.send_json({"type": "ready", "faces": [], "debug": analysis["diag"]["msg"]})
+                    await websocket.send_json({"type": "ready", "faces": [], "debug": "🔍 Searching..."})
 
     except WebSocketDisconnect:
         if websocket in registration_sessions: del registration_sessions[websocket]
