@@ -40,8 +40,17 @@ def detect_faces_crowd(image_bytes):
                 _, buffer = cv2.imencode('.jpg', face_crop, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
                 crop_bytes = buffer.tobytes()
                 
+                # Extract facial landmarks for Anti-Spoofing (Liveness)
+                landmarks = []
+                try:
+                    for kp in detection.location_data.relative_keypoints:
+                        landmarks.append({"x": kp.x, "y": kp.y})
+                except Exception:
+                    pass # Failsafe: if landmarks missing, return empty list
+                
                 face_data.append({
                     "box": {"x": bbox.xmin, "y": bbox.ymin, "w": bbox.width, "h": bbox.height},
+                    "landmarks": landmarks,
                     "bytes": crop_bytes
                 })
                 

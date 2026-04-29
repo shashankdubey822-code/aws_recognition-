@@ -131,6 +131,18 @@
 </head>
 <body class="min-h-screen flex flex-col font-sans">
 
+    <!-- INTRUDER ALERT OVERLAY -->
+    <div id="intruder-alert" class="fixed inset-0 z-[2000] hidden flex flex-col items-center justify-center bg-red-900/90 backdrop-blur-md transition-opacity duration-300">
+        <div class="animate-pulse flex flex-col items-center">
+            <svg class="w-32 h-32 text-white mb-6 drop-shadow-[0_0_20px_rgba(255,0,0,0.8)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+            </svg>
+            <h1 class="text-6xl font-black text-white tracking-widest uppercase drop-shadow-[0_0_15px_rgba(255,0,0,0.8)] mb-4 text-center">INTRUDER DETECTED</h1>
+            <p class="text-xl text-red-200 font-mono tracking-wide mb-8">SECURITY CLEARANCE DENIED. ENTITY LOGGED.</p>
+            <img id="intruder-img" src="" class="w-64 h-64 object-cover rounded-lg border-4 border-white shadow-[0_0_30px_rgba(255,0,0,0.6)]" alt="Intruder Snapshot">
+        </div>
+    </div>
+
     <!-- Toast Notifications Container -->
     <div id="toast-container"></div>
 

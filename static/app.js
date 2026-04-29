@@ -145,6 +145,17 @@ function playTone(freq, type, duration, vol=0.1) {
     osc.stop(audioCtx.currentTime + duration);
 }
 
+function speakWarning(text) {
+    if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const msg = new SpeechSynthesisUtterance(text);
+        msg.rate = 0.9;
+        msg.pitch = 0.5;
+        msg.volume = 1.0;
+        window.speechSynthesis.speak(msg);
+    }
+}
+
 // --- CINEMATIC HUD RENDERING ---
 function updateTargetFaces(faces) {
     const now = Date.now();
@@ -228,14 +239,19 @@ function drawSmoothFaces() {
         let color = '#ef4444'; // Red
         if (face.status === 'match') color = '#10b981'; // Green
         else if (face.status === 'verifying') color = '#00d2ff'; // Cyan
+        else if (face.status === 'spoof') color = '#ff0000'; // Pure Red
         
-        const alpha = age > 200 ? Math.max(0, 1 - ((age - 200) / 1000)) : 1;
+        let alpha = age > 200 ? Math.max(0, 1 - ((age - 200) / 1000)) : 1;
+        if (face.status === 'spoof' && Date.now() % 500 < 250) alpha = 0.2; // Flash effect
         
         drawHighTechCorners(overlayCtx, mirroredX, y, w, h, color, alpha);
         
         // Target Box HUD Label
         overlayCtx.globalAlpha = alpha;
-        const labelText = face.status === 'verifying' ? `SCANNING...` : `${face.name.replace(/_/g, ' ')} [${face.score.toFixed(1)}%]`;
+        let labelText = '';
+        if (face.status === 'verifying') labelText = 'SCANNING...';
+        else if (face.status === 'spoof') labelText = 'SPOOF DETECTED';
+        else labelText = `${face.name.replace(/_/g, ' ')} [${(face.score || 0).toFixed(1)}%]`;
         
         overlayCtx.font = 'bold 12px "Orbitron", monospace';
         const textWidth = overlayCtx.measureText(labelText).width;
@@ -324,12 +340,13 @@ function updateDebugCrops(faces) {
             let borderCol = 'border-red-500/50';
             if (face.status === 'match') borderCol = 'border-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]';
             else if (face.status === 'verifying') borderCol = 'border-brand-cyan shadow-[0_0_10px_rgba(0,210,255,0.5)]';
+            else if (face.status === 'spoof') borderCol = 'border-red-600 shadow-[0_0_15px_rgba(255,0,0,0.8)] animate-pulse';
             
             img.className = `w-14 h-14 rounded-md border-2 ${borderCol} object-cover`;
             
             const badge = document.createElement('div');
             badge.className = 'absolute bottom-0 left-0 right-0 bg-black/80 text-[8px] text-center py-0.5 truncate text-white font-mono';
-            badge.textContent = face.status === 'match' ? 'VERIFIED' : (face.status === 'verifying' ? 'SCANNING' : 'UNKNOWN');
+            badge.textContent = face.status === 'match' ? 'VERIFIED' : (face.status === 'verifying' ? 'SCANNING' : (face.status === 'spoof' ? 'SPOOF' : 'UNKNOWN'));
             
             container.appendChild(img);
             container.appendChild(badge);
@@ -358,6 +375,23 @@ function connectWebSocket() {
             isProcessing = false;
             logToTerminal(data.message, "error");
             showToast(data.message, "error");
+            return;
+        }
+
+        if (data.type === 'intruder_alert') {
+            const overlay = document.getElementById('intruder-alert');
+            if (overlay) overlay.classList.remove('hidden');
+            const img = document.getElementById('intruder-img');
+            if (img) img.src = data.image;
+            
+            initAudio();
+            playTone(300, 'square', 1.0, 0.5);
+            speakWarning("Security Alert. Unidentified entity detected.");
+            logToTerminal(`[WARNING] Intruder Snapshot Captured!`, "error");
+            
+            setTimeout(() => {
+                if (overlay) overlay.classList.add('hidden');
+            }, 5000);
             return;
         }
 

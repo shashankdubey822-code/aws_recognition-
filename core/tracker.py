@@ -21,7 +21,9 @@ class CentroidTracker:
             "name": "Scanning...",
             "aws_calls": 0,
             "aws_status": "unknown",
-            "score": 0.0
+            "score": 0.0,
+            "landmarks_history": [],
+            "liveness": "pending"
         }
         self.disappeared[self.next_object_id] = 0
         self.next_object_id += 1
@@ -82,6 +84,30 @@ class CentroidTracker:
                 self.objects[object_id]["centroid"] = input_centroids[col]
                 self.objects[object_id]["box"] = rects[col]["box"]
                 self.disappeared[object_id] = 0
+                
+                # Update landmarks history and compute liveness
+                if "landmarks" in rects[col] and len(rects[col]["landmarks"]) > 0:
+                    lm = rects[col]["landmarks"]
+                    b = rects[col]["box"]
+                    norm_lm = []
+                    for pt in lm:
+                        nx = (pt["x"] - b["x"]) / (b["w"] + 1e-6)
+                        ny = (pt["y"] - b["y"]) / (b["h"] + 1e-6)
+                        norm_lm.append((nx, ny))
+                    
+                    self.objects[object_id]["landmarks_history"].append(norm_lm)
+                    if len(self.objects[object_id]["landmarks_history"]) > 10:
+                        self.objects[object_id]["landmarks_history"].pop(0)
+                        
+                    hist = self.objects[object_id]["landmarks_history"]
+                    if len(hist) >= 5 and self.objects[object_id]["liveness"] == "pending":
+                        hist_np = np.array(hist)
+                        total_variance = np.sum(np.var(hist_np, axis=0))
+                        # Static printed photo will have ~0 variance. Real human micro-movements > 0.00005
+                        if total_variance < 0.00005:
+                            self.objects[object_id]["liveness"] = "spoof"
+                        else:
+                            self.objects[object_id]["liveness"] = "real"
 
                 used_rows.add(row)
                 used_cols.add(col)
@@ -98,5 +124,15 @@ class CentroidTracker:
             unused_cols = set(range(0, D.shape[1])).difference(used_cols)
             for col in unused_cols:
                 self.register(input_centroids[col], rects[col]["box"])
+                # Add initial landmarks
+                if "landmarks" in rects[col] and len(rects[col]["landmarks"]) > 0:
+                    lm = rects[col]["landmarks"]
+                    b = rects[col]["box"]
+                    norm_lm = []
+                    for pt in lm:
+                        nx = (pt["x"] - b["x"]) / (b["w"] + 1e-6)
+                        ny = (pt["y"] - b["y"]) / (b["h"] + 1e-6)
+                        norm_lm.append((nx, ny))
+                    self.objects[self.next_object_id - 1]["landmarks_history"].append(norm_lm)
 
         return self.objects

@@ -3,7 +3,11 @@ import base64
 import time
 import asyncio
 import sqlite3
+import os
+from datetime import datetime
 from fastapi import WebSocket, WebSocketDisconnect
+
+os.makedirs("static/intruders", exist_ok=True)
 from services.aws_client import search_face_on_aws, register_face_to_aws
 from services.attendance import mark_attendance
 from services.face_detector import detect_faces_crowd
@@ -93,11 +97,33 @@ async def websocket_endpoint(websocket: WebSocket):
                     search_object_ids = []
                     
                     for object_id, obj in tracked_objects.items():
+                        # Intruder Alert Capture
+                        if obj["aws_status"] == "failed" and obj["aws_calls"] >= 3 and not obj.get("intruder_alerted"):
+                            obj["intruder_alerted"] = True
+                            for vf in valid_faces:
+                                if vf["box"]["x"] == obj["box"]["x"] and vf["box"]["y"] == obj["box"]["y"]:
+                                    timestamp = int(time.time())
+                                    filepath = f"static/intruders/intruder_{timestamp}.jpg"
+                                    try:
+                                        with open(filepath, "wb") as f:
+                                            f.write(vf["bytes"])
+                                        await websocket.send_json({
+                                            "type": "intruder_alert",
+                                            "message": "UNREGISTERED ENTITY DETECTED",
+                                            "image": f"/static/intruders/intruder_{timestamp}.jpg"
+                                        })
+                                    except Exception as e:
+                                        print(f"Failed to save intruder: {e}")
+                                    break
+
+                        # Liveness check before AWS
+                        if obj["liveness"] == "spoof":
+                            obj["aws_status"] = "spoof"
+                            obj["name"] = "SPOOF DETECTED"
+                            continue # Block AWS ping!
+                            
                         # If face is still scanning and we haven't asked AWS 3 times
-                        if obj["aws_status"] == "unknown" and obj["aws_calls"] < 3:
-                            # We must find the corresponding byte array for this face in valid_faces
-                            # We can do this by matching the exact box coordinates, or since obj["box"] 
-                            # was just updated from valid_faces, we find the one that matches
+                        if obj["aws_status"] == "unknown" and obj["aws_calls"] < 3 and obj["liveness"] == "real":
                             for vf in valid_faces:
                                 if vf["box"]["x"] == obj["box"]["x"] and vf["box"]["y"] == obj["box"]["y"]:
                                     search_tasks.append(asyncio.to_thread(search_face_on_aws, vf["bytes"]))
