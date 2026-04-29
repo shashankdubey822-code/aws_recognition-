@@ -26,6 +26,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 if websocket not in registration_sessions: continue
                 session = registration_sessions[websocket]
                 
+                # HARD BOUNDARY: Stop backend if 12 frames reached
+                if session["frames"] >= 12:
+                    continue
+
                 encoded_data = payload["image"].split(',')[1]
                 image_bytes = base64.b64decode(encoded_data)
                 
@@ -40,21 +44,33 @@ async def websocket_endpoint(websocket: WebSocket):
                     })
                     continue
 
-                # Handle different stages
-                if analysis["precision"] == "low":
+                # ROBUST POSE LOGIC: Use relative head position
+                # yaw is now approximated from Nose vs Face center
+                yaw = analysis["pose"]["yaw"]
+                stage = session["stage"]
+                is_compliant = False
+                instruction = ""
+
+                if stage == "CENTER":
+                    if -18 < yaw < 18: is_compliant = True
+                    else: instruction = "Look directly at the center dot"
+                elif stage == "LEFT":
+                    if yaw > 20: is_compliant = True # Leniency boost
+                    else: instruction = "Turn your head LEFT"
+                elif stage == "RIGHT":
+                    if yaw < -20: is_compliant = True
+                    else: instruction = "Turn your head RIGHT"
+
+                if not is_compliant:
                     await websocket.send_json({
                         "type": "registration_waiting",
-                        "message": "⚠️ Stay still for 3D alignment...",
+                        "message": f"⏳ {instruction}",
                         "progress": session["frames"]
                     })
                     continue
 
-                # Progress Logic
-                success, msg = await asyncio.wait_for(
-                    asyncio.to_thread(register_face_to_aws, image_bytes, session["name"]),
-                    timeout=10.0
-                )
-                
+                # Register Frame
+                success, msg = await asyncio.to_thread(register_face_to_aws, image_bytes, session["name"])
                 if success:
                     session["frames"] += 1
                     if session["frames"] == 4: session["stage"] = "LEFT"
@@ -73,17 +89,26 @@ async def websocket_endpoint(websocket: WebSocket):
                     })
                 continue
 
+            if payload.get("type") == "finish_registration":
+                if websocket in registration_sessions:
+                    name = registration_sessions[websocket]["name"]
+                    await websocket.send_json({
+                        "type": "registration_success",
+                        "message": f"✅ Profile secured for {name}!"
+                    })
+                    del registration_sessions[websocket]
+                continue
+
             if payload.get("type") == "frame":
                 encoded_data = payload["image"].split(',')[1]
                 image_bytes = base64.b64decode(encoded_data)
                 analysis = await asyncio.to_thread(detect_faces_ultra, image_bytes)
                 
-                # Push diagnostics even in live view
                 msg = analysis["diag"]["msg"] if analysis["faces_found"] == 0 else "✅ System Active"
                 
                 await websocket.send_json({
                     "type": "ready", 
-                    "faces": [], # Add boxes if needed later
+                    "faces": [], 
                     "debug": msg
                 })
 

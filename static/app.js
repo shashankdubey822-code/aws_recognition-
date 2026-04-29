@@ -362,8 +362,12 @@ function connectWebSocket() {
                 targetX = overlayCanvas.width * 0.2;
             }
 
-            if (regProgress >= REQUIRED_REG_FRAMES) {
+            // CRITICAL FIX: Stop sending frames immediately when target reached
+            if (regProgress >= REQUIRED_REG_FRAMES && isRegistering) {
+                isRegistering = false; // Kill the loop locally
+                isProcessing = false;
                 regInstruction.textContent = "Processing 3D Neural Profile...";
+                logToTerminal("📡 Finalizing Biometric Link...");
                 ws.send(JSON.stringify({ type: 'finish_registration' }));
             }
         } else if (data.type === 'registration_waiting') {
