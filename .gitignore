@@ -51,3 +51,6 @@ Thumbs.db
 # --- Hugging Face / Docker ---
 .cache/
 .npm/
+
+# --- Local Deployment Scripts ---
+deploy.bat

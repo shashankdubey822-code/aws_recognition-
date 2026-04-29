@@ -588,5 +588,23 @@ document.getElementById('delete-all-btn').addEventListener('click', async () => 
     }
 });
 
+document.getElementById('download-btn').addEventListener('click', () => {
+    showToast("Generating Security Log...", "info");
+    logToTerminal("Exporting security clearance logs...", "info");
+    
+    // Trigger native download
+    const a = document.createElement('a');
+    a.href = '/logs';
+    a.download = ''; // Browser will use filename from Content-Disposition header
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    
+    setTimeout(() => {
+        showToast("Download Complete", "success");
+        logToTerminal("Security logs exported successfully.", "success");
+    }, 1500);
+});
+
 connectWebSocket();
 startCamera();

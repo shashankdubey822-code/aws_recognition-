@@ -1,8 +1,9 @@
 import os
 import asyncio
 import pandas as pd
+import datetime
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -61,10 +62,28 @@ async def read_root(request: Request):
 
 @app.get("/logs")
 async def download_logs():
-    """Download the attendance CSV file."""
-    if os.path.exists(LOG_FILE):
-        return FileResponse(LOG_FILE, media_type='text/csv', filename="attendance_log.csv")
-    return {"error": "Attendance log not found yet. Mark some attendance first!"}
+    """Download the formatted attendance CSV file."""
+    if not os.path.exists(LOG_FILE):
+        return {"error": "Attendance log not found yet. Mark some attendance first!"}
+    try:
+        df = pd.read_csv(LOG_FILE)
+        if not df.empty and 'Name' in df.columns:
+            # Clean names: john_doe_123 -> John Doe 123
+            df['Name'] = df['Name'].apply(lambda x: str(x).replace('_', ' ').title())
+            
+            # Add Status column
+            df['Status'] = 'CLEARANCE GRANTED'
+            
+        csv_content = df.to_csv(index=False)
+        filename = f"Security_Log_{datetime.datetime.now().strftime('%Y-%m-%d')}.csv"
+        
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        return {"error": f"Failed to generate log: {e}"}
 
 @app.post("/delete_faces")
 async def wipe_faces():
