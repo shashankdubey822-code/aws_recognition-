@@ -9,8 +9,9 @@ AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 COLLECTION_ID = os.getenv("AWS_COLLECTION_ID", "hackathon_attendance")
 
-# --- Thresholds ---
-MATCH_THRESHOLD = 90.0 # AWS confidence threshold out of 100
+# --- Thresholds & Security ---
+MATCH_THRESHOLD = 98.0  # Increased for Enterprise Security (prevents false positives)
+MIN_FACE_AREA = 0.03    # Ignore faces smaller than 3% of the screen (posters, backgrounds)
 
 # --- App Config ---
 LOG_FILE = "attendance_log.csv"

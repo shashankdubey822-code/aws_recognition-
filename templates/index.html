@@ -1,126 +1,278 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Enterprise Attendance System</title>
+    <title>Enterprise Security: Facial Recognition</title>
+    <!-- TailwindCSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/style.css?v=2.0">
-    <script src="/static/app.js?v=2.1" defer></script>
+    <!-- Google Fonts for premium typography -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['Orbitron', 'monospace'],
+                    },
+                    colors: {
+                        brand: {
+                            cyan: '#00d2ff',
+                            emerald: '#10b981',
+                            dark: '#050505',
+                            panel: 'rgba(20, 20, 25, 0.7)'
+                        }
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'slideIn': 'slideIn 0.3s ease-out forwards',
+                    },
+                    keyframes: {
+                        slideIn: {
+                            '0%': { opacity: 0, transform: 'translateX(20px)' },
+                            '100%': { opacity: 1, transform: 'translateX(0)' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* High-End Glassmorphism */
+        body {
+            background-color: #050505;
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(0, 210, 255, 0.05), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.05), transparent 25%);
+            color: #e2e8f0;
+            overflow-x: hidden;
+        }
+        .glass-panel {
+            background: rgba(20, 20, 25, 0.6);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+        }
+        .glass-border-gradient {
+            position: relative;
+        }
+        .glass-border-gradient::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            padding: 1px;
+            background: linear-gradient(135deg, rgba(0,210,255,0.4), rgba(16,185,129,0.1));
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            pointer-events: none;
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
+        ::-webkit-scrollbar-thumb { background: rgba(0,210,255,0.3); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(0,210,255,0.6); }
+
+        /* HUD Scanner */
+        #video-container {
+            position: relative;
+            border-radius: 1rem;
+            overflow: hidden;
+            box-shadow: 0 0 40px rgba(0,210,255,0.1);
+        }
+        #videoElement {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror */
+        }
+        #overlayCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        /* Toast Notifications */
+        #toast-container {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .toast {
+            min-width: 300px;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            animation: slideIn 0.3s ease-out forwards;
+            background: rgba(10, 10, 15, 0.9);
+            backdrop-filter: blur(10px);
+            border-left: 4px solid;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+        .toast.error { border-left-color: #ef4444; }
+        .toast.warning { border-left-color: #f59e0b; }
+        .toast.success { border-left-color: #10b981; }
+        .toast.info { border-left-color: #3b82f6; }
+    </style>
 </head>
-<body class="bg-slate-900 text-white min-h-screen font-sans">
-    <div class="container mx-auto p-4 max-w-6xl">
-        <header class="mb-8 flex justify-between items-center border-b border-slate-700 pb-4 mt-4">
+<body class="min-h-screen flex flex-col font-sans">
+
+    <!-- Toast Notifications Container -->
+    <div id="toast-container"></div>
+
+    <!-- Header -->
+    <header class="glass-panel sticky top-0 z-50 border-b border-white/5 py-4 px-6 flex justify-between items-center">
+        <div class="flex items-center gap-4">
+            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-brand-cyan to-brand-emerald flex items-center justify-center shadow-[0_0_15px_rgba(0,210,255,0.5)]">
+                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+            </div>
             <div>
-                <h1 class="text-3xl font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">Enterprise Attendance AI</h1>
-                <p class="text-slate-400 text-sm mt-1">FAISS Vector Engine • 3-Frame Consensus</p>
+                <h1 class="text-xl font-bold tracking-wider text-white">NEXUS<span class="text-brand-cyan">.AI</span></h1>
+                <p class="text-[10px] uppercase tracking-[0.2em] text-brand-emerald font-mono">Biometric Security Subsystem</p>
             </div>
-            <div class="flex items-center gap-4">
-                <button id="delete-all-btn" class="px-4 py-2 rounded-lg text-sm font-bold bg-rose-600 hover:bg-rose-500 text-white transition-colors shadow-lg shadow-rose-500/30 flex items-center gap-2">
-                    <span>🔥</span> Delete All Faces
-                </button>
-                <a href="/logs" download class="px-4 py-2 rounded-lg text-sm font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors shadow-lg shadow-emerald-500/30 flex items-center gap-2">
-                    <span>📥</span> Download Logs
-                </a>
-                <button id="add-student-btn" class="px-4 py-2 rounded-lg text-sm font-bold bg-blue-600 hover:bg-blue-500 text-white transition-colors shadow-lg shadow-blue-500/30">
-                    + Add Student
-                </button>
-                <div id="status-badge" class="px-4 py-2 rounded-full text-sm font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/50">
-                    🟡 Connecting...
-                </div>
+        </div>
+        
+        <div class="flex items-center gap-6">
+            <div class="flex items-center gap-2">
+                <span class="relative flex h-3 w-3">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-emerald opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-3 w-3 bg-brand-emerald"></span>
+                </span>
+                <span id="ws-status" class="text-sm font-mono text-brand-emerald tracking-wide">SYSTEM SECURE</span>
             </div>
-        </header>
+            <button id="add-student-btn" class="bg-brand-cyan/20 hover:bg-brand-cyan/30 text-brand-cyan border border-brand-cyan/50 px-5 py-2 rounded-lg text-sm font-bold tracking-wide transition-all duration-300 shadow-[0_0_10px_rgba(0,210,255,0.2)] hover:shadow-[0_0_20px_rgba(0,210,255,0.4)]">
+                + REGISTER ID
+            </button>
+            <button id="delete-all-btn" class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 px-3 py-2 rounded-lg text-sm font-bold transition-all">
+                WIPE DATABASE
+            </button>
+        </div>
+    </header>
 
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <!-- Video Feed Column -->
-            <div class="lg:col-span-2 space-y-4">
-                <div class="glass rounded-2xl overflow-hidden shadow-2xl relative">
-                    <video id="videoElement" autoplay playsinline class="w-full h-auto transform -scale-x-100 object-cover aspect-video bg-black"></video>
-                    <canvas id="canvasElement" class="hidden"></canvas>
-                    <canvas id="overlayCanvas" class="absolute top-0 left-0 w-full h-full pointer-events-none"></canvas>
-                    
-                    <!-- Registration Overlay (Hidden by default) -->
-                    <div id="reg-overlay" class="absolute inset-0 bg-black/80 hidden flex flex-col items-center justify-center z-20 backdrop-blur-sm">
-                        <div class="w-64 h-64 border-4 border-dashed border-blue-500 rounded-full mb-4 relative">
-                            <div class="absolute inset-0 bg-blue-500/20 rounded-full animate-pulse"></div>
-                        </div>
-                        <h2 id="reg-instruction" class="text-2xl font-bold text-white mb-2">Look Straight</h2>
-                        <p id="reg-subtext" class="text-blue-400 text-sm">Capturing frame 0 / 10</p>
+    <!-- Main Content Grid -->
+    <main class="flex-1 p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1600px] mx-auto w-full">
+        
+        <!-- Left Sidebar: Terminal & Debug -->
+        <div class="lg:col-span-3 flex flex-col gap-6">
+            
+            <!-- System Metrics -->
+            <div class="glass-panel glass-border-gradient rounded-xl p-5">
+                <h3 class="text-xs uppercase tracking-widest text-slate-400 font-mono mb-4 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-brand-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                    Core Metrics
+                </h3>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-black/40 rounded-lg p-3 border border-white/5">
+                        <div class="text-[10px] text-slate-500 uppercase tracking-wide">Tracker FPS</div>
+                        <div class="text-2xl font-mono text-brand-cyan" id="fps-counter">0</div>
+                    </div>
+                    <div class="bg-black/40 rounded-lg p-3 border border-white/5">
+                        <div class="text-[10px] text-slate-500 uppercase tracking-wide">Entities</div>
+                        <div class="text-2xl font-mono text-brand-emerald" id="crop-count">0</div>
                     </div>
                 </div>
                 
-                <div class="glass p-4 rounded-xl">
-                    <h3 class="text-sm font-semibold text-slate-300 mb-2">System Metrics</h3>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-                        <div class="bg-slate-800/50 rounded-lg p-2 border border-slate-700">
-                            <div class="text-xs text-slate-400">Camera FPS</div>
-                            <div id="fps-counter" class="text-lg font-mono text-emerald-400">0</div>
-                        </div>
-                        <div class="bg-slate-800/50 rounded-lg p-2 border border-slate-700">
-                            <div class="text-xs text-slate-400">Backend Status</div>
-                            <div id="ws-status" class="text-lg font-mono text-slate-300">Idle</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Debug Row -->
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="bg-black/80 p-3 rounded-xl border border-slate-700 font-mono text-xs overflow-hidden h-40 flex flex-col">
-                        <div class="text-slate-500 border-b border-slate-800 pb-1 mb-1 flex justify-between">
-                            <span>>_ BACKEND_TERMINAL</span>
-                            <span class="animate-pulse">_</span>
-                        </div>
-                        <div id="terminal-logs" class="flex-1 overflow-y-auto text-slate-300 space-y-1 custom-scrollbar flex flex-col justify-end"></div>
-                    </div>
-                    
-                    <div class="glass p-3 rounded-xl flex flex-col h-40">
-                        <div class="text-[10px] text-amber-400 uppercase tracking-widest font-bold border-b border-slate-700/50 pb-1 mb-2 flex justify-between">
-                            <span>👁️ AI Eye (Live Crops)</span>
-                            <span id="crop-count" class="text-slate-500">0 faces</span>
-                        </div>
-                        <div id="debug-crops" class="flex-1 flex gap-2 overflow-x-auto items-center pb-2 custom-scrollbar">
-                            <div class="text-xs text-slate-600 italic">Waiting for detection...</div>
-                        </div>
+                <!-- Debug Crops Container -->
+                <div class="mt-4 pt-4 border-t border-white/5">
+                    <div class="text-[10px] text-slate-500 uppercase tracking-wide mb-2">Live Feature Extraction</div>
+                    <div id="debug-crops" class="flex flex-wrap gap-2 min-h-[70px]">
+                        <div class="text-xs text-slate-600 italic font-mono">Awaiting target...</div>
                     </div>
                 </div>
             </div>
 
-            <!-- Attendance Log Column -->
-            <div class="space-y-6">
-                <div class="glass rounded-2xl p-6 shadow-2xl flex flex-col h-[300px]">
-                    <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
-                        <span>🟢</span> Live Presence
-                    </h2>
-                    <div id="attendance-list" class="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-                        <div class="text-center text-slate-500 mt-10 text-sm">Camera is empty.</div>
-                    </div>
-                </div>
-
-                <div class="glass rounded-2xl p-6 shadow-2xl flex flex-col h-[400px]">
-                    <h2 class="text-xl font-bold mb-4 flex items-center gap-2 text-emerald-400">
-                        <span>✅</span> Confirmed Attendance
-                    </h2>
-                    <div id="confirmed-list" class="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-                        <div class="text-center text-slate-500 mt-10 text-sm">No one confirmed yet.</div>
-                    </div>
+            <!-- Hacker Terminal -->
+            <div class="glass-panel glass-border-gradient rounded-xl p-5 flex-1 flex flex-col min-h-[300px]">
+                <h3 class="text-xs uppercase tracking-widest text-slate-400 font-mono mb-4 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-brand-emerald" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                    Command Link
+                </h3>
+                <div id="terminal-logs" class="bg-black/60 flex-1 rounded-lg border border-white/10 p-3 font-mono text-xs overflow-y-auto flex flex-col gap-1 tracking-wider shadow-inner">
+                    <div class="text-brand-cyan/70">NEXUS OS v2.0 Initialization...</div>
                 </div>
             </div>
         </div>
-    </div>
+
+        <!-- Center: Cinematic Camera Scanner -->
+        <div class="lg:col-span-6 flex flex-col">
+            <div id="video-container" class="relative flex-1 bg-black rounded-2xl border border-white/10 flex items-center justify-center min-h-[480px]">
+                
+                <!-- Hidden Canvas for capturing frames -->
+                <canvas id="canvasElement" style="display: none;"></canvas>
+                
+                <!-- Actual Video Feed -->
+                <video id="videoElement" autoplay playsinline muted></video>
+                
+                <!-- High-Tech HUD Overlay -->
+                <canvas id="overlayCanvas"></canvas>
+                
+                <!-- Registration Overlay HUD (Hidden normally) -->
+                <div id="reg-overlay" class="absolute inset-0 bg-black/80 backdrop-blur-md hidden flex flex-col items-center justify-center z-20">
+                    <h2 id="reg-instruction" class="text-3xl font-mono text-brand-cyan font-bold tracking-widest mb-2 shadow-cyan">INITIALIZING 3D SCAN</h2>
+                    <p id="reg-subtext" class="text-slate-400 font-mono uppercase tracking-widest text-sm animate-pulse">Align face within target vector...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Sidebar: Presence & Logs -->
+        <div class="lg:col-span-3 flex flex-col gap-6">
+            
+            <!-- Active Presence -->
+            <div class="glass-panel glass-border-gradient rounded-xl p-5 flex-1 max-h-[50vh] flex flex-col">
+                <h3 class="text-xs uppercase tracking-widest text-slate-400 font-mono mb-4 flex justify-between items-center">
+                    <span class="flex items-center gap-2">
+                        <svg class="w-4 h-4 text-brand-emerald" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                        Live Targets
+                    </span>
+                </h3>
+                <div id="attendance-list" class="flex-1 overflow-y-auto flex flex-col gap-3 pr-2">
+                    <div class="text-center text-slate-500/50 mt-10 text-sm font-mono tracking-widest animate-pulse">NO ENTITIES DETECTED</div>
+                </div>
+            </div>
+
+            <!-- Confirmed Logs -->
+            <div class="glass-panel glass-border-gradient rounded-xl p-5 flex-1 max-h-[50vh] flex flex-col">
+                <h3 class="text-xs uppercase tracking-widest text-slate-400 font-mono mb-4 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"></path></svg>
+                    Secure Audit Log
+                </h3>
+                <div id="confirmed-list" class="flex-1 overflow-y-auto flex flex-col gap-3 pr-2">
+                    <div class="text-center text-slate-500/50 mt-10 text-sm font-mono tracking-widest">AWAITING CONFIRMATION</div>
+                </div>
+            </div>
+        </div>
+    </main>
 
     <!-- Registration Modal -->
-    <div id="modal-backdrop" class="fixed inset-0 bg-black/90 z-50 hidden flex items-center justify-center backdrop-blur-md">
-        <div class="bg-slate-800 border border-slate-700 rounded-2xl p-8 max-w-md w-full shadow-2xl transform scale-95 transition-transform duration-300" id="modal-content">
-            <h2 class="text-2xl font-bold text-white mb-2">Register New Student</h2>
-            <p class="text-slate-400 text-sm mb-6">Enter the exact name. You will be asked to move your head to build a 3D-aware profile.</p>
+    <div id="modal-backdrop" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center z-50 transition-all duration-300">
+        <div class="glass-panel glass-border-gradient rounded-2xl p-8 max-w-md w-full shadow-2xl transform scale-100 transition-all">
+            <h2 class="text-2xl font-bold text-white mb-2 tracking-wide">Register Target</h2>
+            <p class="text-sm text-slate-400 mb-6">Enter identity classification to begin biometric 3D scan.</p>
             
-            <input type="text" id="student-name-input" placeholder="e.g. John Doe" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 mb-6">
+            <input type="text" id="student-name-input" placeholder="e.g. John Doe" class="w-full bg-black/50 border border-brand-cyan/30 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-brand-cyan focus:ring-1 focus:ring-brand-cyan transition-all mb-6">
             
             <div class="flex justify-end gap-3">
-                <button id="cancel-btn" class="px-4 py-2 rounded-lg text-sm font-semibold text-slate-300 hover:text-white hover:bg-slate-700 transition-colors">Cancel</button>
-                <button id="start-scan-btn" class="px-6 py-2 rounded-lg text-sm font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors shadow-lg shadow-emerald-500/30">Start Scan</button>
+                <button id="cancel-btn" class="px-5 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-white/5 transition-all font-semibold">Cancel</button>
+                <button id="start-scan-btn" class="bg-gradient-to-r from-brand-cyan to-blue-600 hover:from-brand-cyan hover:to-blue-500 text-white px-6 py-2 rounded-lg font-bold shadow-[0_0_15px_rgba(0,210,255,0.4)] transition-all transform hover:scale-105">Initiate Scan</button>
             </div>
         </div>
     </div>
+
+    <!-- Core App Logic -->
+    <script src="/static/app.js"></script>
 </body>
 </html>
