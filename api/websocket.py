@@ -150,6 +150,14 @@ async def websocket_endpoint(websocket: WebSocket):
                         "debug": f"Tracking {len(tracked_objects)} people"
                     })
 
+            except WebSocketDisconnect:
+                break
+            except RuntimeError as e:
+                if "disconnect" in str(e).lower() or "close" in str(e).lower():
+                    break
+                print(f"Frame Error: {e}")
+                try: await websocket.send_json({"type": "error", "message": f"Frame Error: {str(e)}"})
+                except: pass
             except Exception as e:
                 # Catch per-frame exceptions so we don't drop the connection!
                 print(f"Frame Error: {e}")
