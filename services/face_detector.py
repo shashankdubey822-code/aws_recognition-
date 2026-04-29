@@ -1,95 +1,97 @@
-"""
-Local Face Detection using Google MediaPipe
-Filters frames before sending to AWS Rekognition
-Saves 75% AWS costs by only sending confirmed faces
-"""
-import os
 import cv2
 import numpy as np
+import mediapipe as mp
+from scipy.spatial import distance as dist
 
-# Initialize MediaPipe Face Detection with heavy error handling
-face_detection = None
-try:
-    import mediapipe as mp
-    # Try multiple import styles for different environments
-    if hasattr(mp, 'solutions'):
-        mp_face_detection = mp.solutions.face_detection
-    else:
-        import mediapipe.python.solutions.face_detection as mp_face_detection
-        
-    face_detection = mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
-    print("✅ MediaPipe Face Detection loaded successfully")
-except Exception as e:
-    print(f"⚠️ MediaPipe load failed: {e}. Falling back to AWS-only detection.")
-    face_detection = None
+# --- HIGH-ACCURACY ENGINE CONFIG ---
+mp_face_mesh = mp.solutions.face_mesh
+face_mesh = mp_face_mesh.FaceMesh(
+    static_image_mode=False,
+    max_num_faces=1,
+    refine_landmarks=True,
+    min_detection_confidence=0.7,
+    min_tracking_confidence=0.7
+)
 
-def detect_faces_local(image_bytes):
+def get_head_pose(landmarks, img_w, img_h):
     """
-    Local face detection (FREE, no AWS cost) using MediaPipe
-    If MediaPipe is not available, defaults to True to ensure system works.
+    Calculates Head Pose (Yaw, Pitch, Roll) using 3D points
     """
-    if face_detection is None:
-        # Fallback: Always send to AWS if local detection is broken
-        return {
-            "faces_found": 1, 
-            "should_send_to_aws": True, 
-            "info": "mediapipe_unavailable_fallback"
-        }
+    # Specific landmarks for pose estimation
+    # 1: Nose tip, 152: Chin, 33: Left eye corner, 263: Right eye corner, 61: Left mouth, 291: Right mouth
+    face_3d = []
+    face_2d = []
+    
+    for idx, lm in enumerate(landmarks.landmark):
+        if idx in [1, 152, 33, 263, 61, 291]:
+            x, y = int(lm.x * img_w), int(lm.y * img_h)
+            face_2d.append([x, y])
+            face_3d.append([x, y, lm.z]) # lm.z is already scaled roughly
 
+    face_2d = np.array(face_2d, dtype=np.float64)
+    face_3d = np.array(face_3d, dtype=np.float64)
+
+    # Camera Matrix
+    focal_length = 1 * img_w
+    cam_matrix = np.array([ [focal_length, 0, img_h / 2],
+                            [0, focal_length, img_w / 2],
+                            [0, 0, 1]], dtype=np.float64)
+    dist_matrix = np.zeros((4, 1), dtype=np.float64)
+
+    # Solve PnP
+    success, rot_vec, trans_vec = cv2.solvePnP(face_3d, face_2d, cam_matrix, dist_matrix)
+    rmat, _ = cv2.Rodrigues(rot_vec)
+    angles, _, _, _, _, _ = cv2.decomposeProjectionMatrix(np.hstack((rmat, trans_vec)))
+
+    # Convert to Degrees
+    pitch, yaw, roll = angles[0] * 360, angles[1] * 360, angles[2] * 360
+    return yaw, pitch, roll
+
+def get_eye_aspect_ratio(landmarks, eye_indices):
+    """Calculates Eye Aspect Ratio (EAR) for blink detection"""
+    points = []
+    for idx in eye_indices:
+        lm = landmarks.landmark[idx]
+        points.append([lm.x, lm.y])
+    
+    points = np.array(points)
+    # Vertical distances
+    v1 = dist.euclidean(points[1], points[5])
+    v2 = dist.euclidean(points[2], points[4])
+    # Horizontal distance
+    h = dist.euclidean(points[0], points[3])
+    return (v1 + v2) / (2.0 * h)
+
+def detect_faces_ultra(image_bytes):
+    """
+    Advanced real-time pose and identity validator
+    """
     try:
-        # Decode image
         nparr = np.frombuffer(image_bytes, np.uint8)
-        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None: return None
         
-        if image is None:
-            return {"faces_found": 0, "should_send_to_aws": False}
-            
-        # Convert the BGR image to RGB as required by MediaPipe
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        height, width, _ = image.shape
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        h, w, _ = img.shape
+        results = face_mesh.process(img_rgb)
         
-        # Process the image and find faces
-        results = face_detection.process(image_rgb)
+        if not results.multi_face_landmarks:
+            return {"faces_found": 0}
+
+        landmarks = results.multi_face_landmarks[0]
+        yaw, pitch, roll = get_head_pose(landmarks, w, h)
         
-        faces_data = {
-            "faces_found": 0,
-            "confidence": [],
-            "boxes": [],
-            "should_send_to_aws": False
-        }
-        
-        if results.detections:
-            num_faces = len(results.detections)
-            faces_data["faces_found"] = num_faces
-            faces_data["should_send_to_aws"] = num_faces > 0
-            
-            for detection in results.detections:
-                conf = float(detection.score[0])
-                faces_data["confidence"].append(conf)
-                
-                # Bounding box is relative to image size [0, 1]
-                bbox = detection.location_data.relative_bounding_box
-                x1 = int(bbox.xmin * width)
-                y1 = int(bbox.ymin * height)
-                w = int(bbox.width * width)
-                h = int(bbox.height * height)
-                x2 = x1 + w
-                y2 = y1 + h
-                
-                faces_data["boxes"].append({
-                    "x1": x1,
-                    "y1": y1,
-                    "x2": x2,
-                    "y2": y2,
-                    "confidence": conf
-                })
-                
-        return faces_data
-        
-    except Exception as e:
-        print(f"❌ Face detection runtime error: {e}")
+        # Blink Detection (EAR)
+        left_ear = get_eye_aspect_ratio(landmarks, [362, 385, 387, 263, 373, 380])
+        right_ear = get_eye_aspect_ratio(landmarks, [33, 160, 158, 133, 153, 144])
+        ear = (left_ear + right_ear) / 2.0
+
         return {
             "faces_found": 1,
-            "should_send_to_aws": True,
-            "error": str(e)
+            "pose": {"yaw": yaw, "pitch": pitch, "roll": roll},
+            "liveness": {"ear": ear, "is_blinking": ear < 0.2},
+            "should_send_to_aws": True # Still send for full recognition
         }
+    except Exception as e:
+        print(f"Ultra Detector Error: {e}")
+        return {"faces_found": 0, "error": str(e)}
