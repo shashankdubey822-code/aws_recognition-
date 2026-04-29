@@ -48,9 +48,47 @@ async def websocket_endpoint(websocket: WebSocket):
                         await websocket.send_json({"type": "registration_waiting", "message": "🔍 No face detected", "progress": int((session["frames"]/20)*100)})
                         continue
 
+                    face = faces[0]
+                    
+                    # --- ENVIRONMENTAL AUTO-COACHING ---
+                    brightness = face.get("brightness", 100)
+                    blur = face.get("blur", 100)
+                    
+                    if brightness < 40:
+                        await websocket.send_json({"type": "registration_waiting", "message": "Lighting too dark. Move to a brighter area.", "progress": int((session["frames"]/20)*100)})
+                        continue
+                    if blur < 50:
+                        await websocket.send_json({"type": "registration_waiting", "message": "Camera out of focus. Please hold still.", "progress": int((session["frames"]/20)*100)})
+                        continue
+                        
+                    # --- ACTIVE LIVENESS (SIMON SAYS) ---
+                    nose_x = None
+                    if "landmarks" in face and len(face["landmarks"]) > 2:
+                        nose_x = face["landmarks"][2]["x"]
+                        
+                    if nose_x is not None:
+                        bbox = face["box"]
+                        nose_rel_x = (nose_x - bbox["x"]) / (bbox["w"] + 1e-6)
+                        frames = session["frames"]
+                        
+                        if frames < 5:
+                            if not (0.35 < nose_rel_x < 0.65):
+                                await websocket.send_json({"type": "registration_waiting", "message": "Maintain Center Lock. Look straight ahead.", "progress": int((frames/20)*100)})
+                                continue
+                        elif 5 <= frames < 12:
+                            # Nose shifted right relative to box (meaning looking left, usually)
+                            if nose_rel_x < 0.55: 
+                                await websocket.send_json({"type": "registration_waiting", "message": "Turn head LEFT to continue.", "progress": int((frames/20)*100)})
+                                continue
+                        elif 12 <= frames < 18:
+                            # Nose shifted left relative to box
+                            if nose_rel_x > 0.45:
+                                await websocket.send_json({"type": "registration_waiting", "message": "Turn head RIGHT to continue.", "progress": int((frames/20)*100)})
+                                continue
+
                     # --- IDENTITY GUARD ---
                     if session["frames"] == 0:
-                        search_results = await asyncio.to_thread(search_face_on_aws, faces[0]["bytes"])
+                        search_results = await asyncio.to_thread(search_face_on_aws, face["bytes"])
                         if search_results and any(res["status"] == "match" for res in search_results):
                             match_name = next(res["name"] for res in search_results if res["status"] == "match")
                             await websocket.send_json({
@@ -60,7 +98,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             del registration_sessions[websocket]
                             continue
 
-                    success, msg = await asyncio.to_thread(register_face_to_aws, faces[0]["bytes"], session["name"])
+                    success, msg = await asyncio.to_thread(register_face_to_aws, face["bytes"], session["name"])
                     if success:
                         session["frames"] += 1
                         progress = int((session["frames"]/20)*100)
@@ -143,6 +181,14 @@ async def websocket_endpoint(websocket: WebSocket):
                                     tracker.objects[obj_id]["aws_status"] = "match"
                                     tracker.objects[obj_id]["score"] = res["score"]
                                     
+                                    # --- FEDERATED LEARNING (DYNAMIC PROFILES) ---
+                                    # If confidence is exceptionally high, update their neural profile
+                                    # to adapt to new lighting, glasses, or aging.
+                                    if res["score"] > 98.0 and not tracker.objects[obj_id].get("federated_updated"):
+                                        tracker.objects[obj_id]["federated_updated"] = True
+                                        asyncio.create_task(asyncio.to_thread(register_face_to_aws, vf["bytes"], res["name"]))
+                                        print(f"[FEDERATED LEARNING] Updated AWS neural profile for {res['name']} (Score: {res['score']})")
+
                                     # Mark Attendance
                                     mark_attendance(res["name"])
                                     await websocket.send_json({"type": "attendance", "name": res["name"], "time": "Now"})

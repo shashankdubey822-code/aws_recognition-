@@ -431,6 +431,15 @@ function connectWebSocket() {
         else if (data.type === 'registration_waiting') {
             isProcessing = false;
             regSubtext.textContent = data.message;
+            
+            // Auto-Coaching Audio Feedback
+            const msgLower = data.message.toLowerCase();
+            if (msgLower.includes("dark") || msgLower.includes("focus") || msgLower.includes("turn") || msgLower.includes("center")) {
+                if (!window.lastSpeakTime || Date.now() - window.lastSpeakTime > 4000) {
+                    speakWarning(data.message);
+                    window.lastSpeakTime = Date.now();
+                }
+            }
         } 
         else if (data.type === 'registration_success') {
             playTone(1200, 'triangle', 0.4, 0.2);

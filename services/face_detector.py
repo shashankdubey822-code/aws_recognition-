@@ -48,10 +48,20 @@ def detect_faces_crowd(image_bytes):
                 except Exception:
                     pass # Failsafe: if landmarks missing, return empty list
                 
+                # Environmental Analysis (Brightness & Blur)
+                try:
+                    gray_crop = cv2.cvtColor(face_crop, cv2.COLOR_BGR2GRAY)
+                    brightness = float(np.mean(gray_crop))
+                    blur = float(cv2.Laplacian(gray_crop, cv2.CV_64F).var())
+                except:
+                    brightness, blur = 100.0, 100.0 # Failsafe defaults
+                
                 face_data.append({
                     "box": {"x": bbox.xmin, "y": bbox.ymin, "w": bbox.width, "h": bbox.height},
                     "landmarks": landmarks,
-                    "bytes": crop_bytes
+                    "bytes": crop_bytes,
+                    "brightness": brightness,
+                    "blur": blur
                 })
                 
         return face_data
