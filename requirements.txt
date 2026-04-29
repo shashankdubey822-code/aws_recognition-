@@ -6,16 +6,12 @@ python-multipart==0.0.6
 jinja2==3.1.2
 aiofiles==23.2.1
 
-# AI & Computer Vision
+# AI & Computer Vision (Local Processing)
 opencv-python-headless
 numpy==1.26.4
 pandas
 mediapipe==0.10.11
-scipy
-deepface
-tf-keras
-tensorflow-cpu
 
-# Utils
-python-dotenv==1.0.0
+# AWS SDK (The Core Engine)
 boto3==1.34.0
+python-dotenv==1.0.0
