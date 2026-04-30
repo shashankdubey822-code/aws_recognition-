@@ -100,17 +100,29 @@ class CentroidTracker:
                         ny = (pt["y"] - b["y"]) / (b["h"] + 1e-6)
                         norm_lm.append((nx, ny))
                     
-                    self.objects[object_id]["landmarks_history"].append(norm_lm)
+                    # 3D Parallax Calculation (Inter-Landmark Distance Ratio)
+                    if len(norm_lm) >= 3:
+                        re_x, re_y = norm_lm[0] # Right Eye
+                        le_x, le_y = norm_lm[1] # Left Eye
+                        nose_x, nose_y = norm_lm[2] # Nose Tip
+                        
+                        dist_left = math.sqrt((nose_x - le_x)**2 + (nose_y - le_y)**2)
+                        dist_right = math.sqrt((nose_x - re_x)**2 + (nose_y - re_y)**2)
+                        
+                        ratio = dist_left / (dist_right + 1e-6)
+                        self.objects[object_id]["landmarks_history"].append(ratio)
+                        
                     if len(self.objects[object_id]["landmarks_history"]) > 10:
                         self.objects[object_id]["landmarks_history"].pop(0)
                         
                     hist = self.objects[object_id]["landmarks_history"]
                     if len(hist) >= 5 and self.objects[object_id]["liveness"] == "pending":
-                        hist_np = np.array(hist)
-                        total_variance = np.sum(np.var(hist_np, axis=0))
-                        # Static printed photo will have ~0 variance. Real human micro-movements > 0.00005
-                        if total_variance < 0.00005:
+                        ratio_variance = float(np.var(hist))
+                        # A real 3D head undergoes natural micro-parallax (>0.00005)
+                        # A flat 2D photo keeps ratios mathematically identical (~0.0000)
+                        if ratio_variance < 0.00005:
                             self.objects[object_id]["liveness"] = "spoof"
+                            print(f"[AGI SHIELD] 🛑 2D Flat Photo detected! (Parallax Variance: {ratio_variance:.6f})")
                         else:
                             self.objects[object_id]["liveness"] = "real"
 
