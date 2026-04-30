@@ -45,6 +45,9 @@ let trackedFaces = {};
 const LERP_FACTOR = 0.3; 
 const BOX_FADEOUT_MS = 2000; 
 
+// --- CHALLENGE-RESPONSE STATE ---
+let activeChallenges = {}; // face_id -> { instruction, deadline, element }
+
 // --- TOAST NOTIFICATION SYSTEM ---
 function showToast(message, type = 'info') {
     const container = document.getElementById('toast-container');
@@ -160,6 +163,103 @@ function speakWarning(text) {
         msg.volume = 1.0;
         window.speechSynthesis.speak(msg);
     }
+}
+
+// --- CHALLENGE-RESPONSE UI FUNCTIONS ---
+const DIRECTION_ARROWS = { LEFT: '←', RIGHT: '→', UP: '↑', DOWN: '↓' };
+
+function showChallengeOverlay(faceId, instruction) {
+    hideChallengeOverlay(faceId); // Remove any existing overlay first
+    
+    const container = document.getElementById('video-container');
+    const panel = document.createElement('div');
+    panel.id = `challenge-overlay-${faceId}`;
+    panel.style.cssText = `
+        position: absolute; inset: 0; z-index: 30;
+        background: rgba(220, 38, 38, 0.15);
+        border: 3px solid rgba(220, 38, 38, 0.8);
+        border-radius: 1rem;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        backdrop-filter: blur(2px);
+        animation: challengePulse 0.8s ease-in-out infinite alternate;
+    `;
+    
+    const deadline = Date.now() + 15000;
+    activeChallenges[faceId].element = panel;
+    activeChallenges[faceId].deadline = deadline;
+
+    panel.innerHTML = `
+        <div style="text-align:center; padding: 1rem;">
+            <div style="font-family:'Orbitron',monospace; font-size:13px; color:#fca5a5; letter-spacing:0.2em; margin-bottom:8px;">⚠ IDENTITY CHALLENGE REQUIRED</div>
+            <div style="font-family:'Orbitron',monospace; font-size:48px; color:#ff4444; margin: 8px 0; text-shadow: 0 0 20px rgba(255,68,68,0.8);">${DIRECTION_ARROWS[instruction]}</div>
+            <div style="font-family:'Orbitron',monospace; font-size:20px; font-weight:900; color:white; letter-spacing:0.15em;">TURN ${instruction}</div>
+            <div id="challenge-countdown-${faceId}" style="font-family:'Orbitron',monospace; font-size:13px; color:#fca5a5; margin-top:10px;">15s remaining</div>
+        </div>
+    `;
+    container.appendChild(panel);
+
+    // Add CSS animation
+    if (!document.getElementById('challenge-style')) {
+        const style = document.createElement('style');
+        style.id = 'challenge-style';
+        style.textContent = `
+            @keyframes challengePulse {
+                from { border-color: rgba(220,38,38,0.6); box-shadow: 0 0 10px rgba(220,38,38,0.3); }
+                to   { border-color: rgba(220,38,38,1.0); box-shadow: 0 0 30px rgba(220,38,38,0.8); }
+            }
+            @keyframes challengePass {
+                from { border-color: rgba(16,185,129,0.4); }
+                to   { border-color: rgba(16,185,129,1.0); box-shadow: 0 0 40px rgba(16,185,129,0.8); }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    // Countdown timer
+    const tick = setInterval(() => {
+        const remaining = Math.max(0, Math.ceil((activeChallenges[faceId]?.deadline - Date.now()) / 1000));
+        const el = document.getElementById(`challenge-countdown-${faceId}`);
+        if (el) el.textContent = `${remaining}s remaining`;
+        if (remaining <= 0) clearInterval(tick);
+    }, 500);
+    activeChallenges[faceId].tickInterval = tick;
+}
+
+function updateChallengeOverlay(faceId, result) {
+    const panel = activeChallenges[faceId]?.element;
+    if (!panel) return;
+    if (result === 'passed') {
+        panel.style.background = 'rgba(16, 185, 129, 0.2)';
+        panel.style.borderColor = 'rgba(16, 185, 129, 0.9)';
+        panel.style.animation = 'challengePass 0.5s ease-in-out infinite alternate';
+        panel.innerHTML = `
+            <div style="text-align:center; padding: 1rem;">
+                <div style="font-size: 56px;">✅</div>
+                <div style="font-family:'Orbitron',monospace; font-size:20px; font-weight:900; color:#10b981; letter-spacing:0.1em; margin-top:10px;">LIVENESS CONFIRMED</div>
+                <div style="font-family:'Orbitron',monospace; font-size:11px; color:#6ee7b7; margin-top:6px;">Proceeding to identity verification...</div>
+            </div>
+        `;
+    } else {
+        panel.style.background = 'rgba(127, 0, 0, 0.5)';
+        panel.style.animation = 'none';
+        panel.innerHTML = `
+            <div style="text-align:center; padding: 1rem;">
+                <div style="font-size: 56px;">❌</div>
+                <div style="font-family:'Orbitron',monospace; font-size:20px; font-weight:900; color:#ff4444; letter-spacing:0.1em; margin-top:10px;">SPOOF CONFIRMED</div>
+                <div style="font-family:'Orbitron',monospace; font-size:11px; color:#fca5a5; margin-top:6px;">Access Denied. Entity Logged.</div>
+            </div>
+        `;
+    }
+}
+
+function hideChallengeOverlay(faceId) {
+    const ch = activeChallenges[faceId];
+    if (ch) {
+        if (ch.tickInterval) clearInterval(ch.tickInterval);
+        if (ch.element) ch.element.remove();
+    }
+    delete activeChallenges[faceId];
 }
 
 // --- CINEMATIC HUD RENDERING ---
@@ -504,11 +604,51 @@ function connectWebSocket() {
 
         else if (data.type === 'attendance') {
             currentlyVisible[data.name] = Date.now();
+            // Clear any active challenge for this face when attendance confirmed
+            for (const fid in activeChallenges) {
+                hideChallengeOverlay(fid);
+            }
             renderPresenceList();
             addConfirmedEntry(data.name, data.time);
             showToast(`Clearance Granted: ${data.name.replace(/_/g, ' ')}`, "success");
             playTone(1500, 'sine', 0.1);
             logToTerminal(`Clearance Granted: ${data.name}`, "success");
+        }
+
+        // --- CHALLENGE-RESPONSE MESSAGE HANDLERS ---
+        else if (data.type === 'challenge') {
+            const fid = data.face_id;
+            const instruction = data.instruction;
+            activeChallenges[fid] = { instruction, deadline: Date.now() + 15000 };
+
+            showChallengeOverlay(fid, instruction);
+
+            // Speak the challenge instruction
+            initAudio();
+            playTone(440, 'sine', 0.3, 0.15);
+            speakWarning(`Security check. Turn your head ${instruction}.`);
+            logToTerminal(`[CHALLENGE] Face ${fid}: Turn ${instruction}`, 'warning');
+        }
+
+        else if (data.type === 'challenge_passed') {
+            const fid = data.face_id;
+            if (activeChallenges[fid]) {
+                updateChallengeOverlay(fid, 'passed');
+                playTone(1200, 'triangle', 0.4, 0.2);
+                setTimeout(() => hideChallengeOverlay(fid), 2000);
+            }
+            logToTerminal(`[CHALLENGE] ✅ Face ${fid} verified as real!`, 'success');
+        }
+
+        else if (data.type === 'challenge_failed') {
+            const fid = data.face_id;
+            if (activeChallenges[fid]) {
+                updateChallengeOverlay(fid, 'failed');
+                playTone(200, 'sawtooth', 0.8, 0.3);
+                speakWarning("Spoof detected. Access denied.");
+                setTimeout(() => hideChallengeOverlay(fid), 3000);
+            }
+            logToTerminal(`[CHALLENGE] ❌ Face ${fid} SPOOF CONFIRMED`, 'error');
         } 
         else if (data.type === 'ready') {
             isProcessing = false;

@@ -4,6 +4,7 @@ import time
 import asyncio
 import sqlite3
 import os
+import random
 from datetime import datetime
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -174,7 +175,8 @@ async def websocket_endpoint(websocket: WebSocket):
                                     break
 
                         # Liveness check before AWS
-                        if obj["liveness"] == "spoof":
+                        # ALLOW challenge-active faces through — they are being verified interactively
+                        if obj["liveness"] == "spoof" and obj["challenge_state"] not in ("active", "verified_real"):
                             obj["aws_status"] = "spoof"
                             obj["name"] = "SPOOF DETECTED"
                             continue # Block AWS ping!
@@ -201,8 +203,6 @@ async def websocket_endpoint(websocket: WebSocket):
                                     tracker.objects[obj_id]["score"] = res["score"]
                                     
                                     # --- FEDERATED LEARNING (DYNAMIC PROFILES) ---
-                                    # If confidence is exceptionally high, update their neural profile
-                                    # to adapt to new lighting, glasses, or aging.
                                     if res["score"] > 98.0 and not tracker.objects[obj_id].get("federated_updated"):
                                         tracker.objects[obj_id]["federated_updated"] = True
                                         asyncio.create_task(asyncio.to_thread(register_face_to_aws, vf["bytes"], res["name"]))
@@ -212,7 +212,61 @@ async def websocket_endpoint(websocket: WebSocket):
                                     mark_attendance(res["name"])
                                     await websocket.send_json({"type": "attendance", "name": res["name"], "time": "Now"})
                                 else:
-                                    tracker.objects[obj_id]["aws_status"] = "failed" # AWS says it's unknown
+                                    tracker.objects[obj_id]["aws_status"] = "failed"
+
+                    # --- CHALLENGE-RESPONSE ENGINE ---
+                    # Triggers ONLY when a face has been in red-box (spoof) state for sustained frames
+                    SPOOF_STREAK_THRESHOLD = 20  # ~2 seconds of continuous spoof detection
+                    for object_id, obj in tracked_objects.items():
+                        c_state = obj.get("challenge_state")
+
+                        # TRIGGER: Red-box face hit the streak threshold → initiate challenge
+                        if obj["spoof_streak"] >= SPOOF_STREAK_THRESHOLD and c_state is None:
+                            instruction = random.choice(["LEFT", "RIGHT", "UP", "DOWN"])
+                            # Capture current nose as baseline
+                            baseline = (0.5, 0.5)
+                            hist = obj.get("landmarks_history", [])
+                            if hist:
+                                last = hist[-1]
+                                baseline = (last[1], 0.5)  # nose_x from tuple (ratio, nose_x)
+
+                            tracker.objects[object_id]["challenge_state"] = "active"
+                            tracker.objects[object_id]["challenge_instruction"] = instruction
+                            tracker.objects[object_id]["challenge_baseline"] = baseline
+                            tracker.objects[object_id]["challenge_compliance_frames"] = 0
+                            tracker.objects[object_id]["challenge_start_time"] = time.time()
+                            print(f"[CHALLENGE] 🎯 Issuing challenge to face {object_id}: {instruction}")
+                            await websocket.send_json({
+                                "type": "challenge",
+                                "face_id": object_id,
+                                "instruction": instruction
+                            })
+
+                        # PASSED: Tracker math confirmed real human → notify frontend, re-open AWS gate
+                        elif c_state == "verified_real":
+                            tracker.objects[object_id]["challenge_state"] = None
+                            await websocket.send_json({
+                                "type": "challenge_passed",
+                                "face_id": object_id,
+                                "message": "✅ Liveness Confirmed — Identity Verification Proceeding"
+                            })
+
+                        # TIMEOUT: Challenge active but 15 seconds elapsed → spoof confirmed
+                        elif c_state == "active":
+                            start_t = obj.get("challenge_start_time", time.time())
+                            if time.time() - start_t > 15:
+                                tracker.objects[object_id]["challenge_state"] = "verified_spoof"
+                                tracker.objects[object_id]["liveness"] = "spoof"
+                                tracker.objects[object_id]["aws_status"] = "spoof"
+                                tracker.objects[object_id]["name"] = "SPOOF CONFIRMED"
+                                print(f"[CHALLENGE] ❌ Face {object_id} FAILED challenge — timeout")
+                                await websocket.send_json({
+                                    "type": "challenge_failed",
+                                    "face_id": object_id,
+                                    "message": "❌ Challenge Failed — Spoof Confirmed"
+                                })
+
+
 
                     # Prepare UI Response
                     for object_id, obj in tracked_objects.items():

@@ -14,7 +14,7 @@ class CentroidTracker:
         self.max_distance = max_distance
 
     def register(self, centroid, box):
-        # Register a new face
+        # Register a new face with full challenge state machine fields
         self.objects[self.next_object_id] = {
             "centroid": centroid,
             "box": box,
@@ -23,7 +23,13 @@ class CentroidTracker:
             "aws_status": "unknown",
             "score": 0.0,
             "landmarks_history": [],
-            "liveness": "pending"
+            "liveness": "pending",
+            # --- Challenge-Response Liveness State Machine ---
+            "spoof_streak": 0,           # consecutive frames detected as spoof
+            "challenge_state": None,     # None | "active" | "verified_real" | "verified_spoof"
+            "challenge_instruction": None, # "LEFT" | "RIGHT" | "UP" | "DOWN"
+            "challenge_baseline": None,  # (nose_x, nose_y) captured at challenge start
+            "challenge_compliance_frames": 0  # consecutive frames compliance is detected
         }
         self.disappeared[self.next_object_id] = 0
         self.next_object_id += 1
@@ -127,11 +133,39 @@ class CentroidTracker:
                         
                         # CONTINUOUS EVALUATION (No "pending" lock)
                         # Threshold 0.0002 filters out MediaPipe AI Jitter!
-                        if ratio_variance < 0.0002 and nose_drift < 0.00005:
-                            self.objects[object_id]["liveness"] = "spoof"
-                            print(f"[AGI SHIELD] 🛑 2D Photo Detected! (Parallax: {ratio_variance:.6f}, Drift: {nose_drift:.6f})")
-                        else:
-                            self.objects[object_id]["liveness"] = "real"
+                        # Only evaluate if NOT currently in an active challenge
+                        if self.objects[object_id]["challenge_state"] != "active":
+                            if ratio_variance < 0.0002 and nose_drift < 0.00005:
+                                self.objects[object_id]["liveness"] = "spoof"
+                                self.objects[object_id]["spoof_streak"] += 1
+                                print(f"[AGI SHIELD] 🛑 2D Photo Suspected! (Parallax: {ratio_variance:.6f}, Drift: {nose_drift:.6f}) Streak: {self.objects[object_id]['spoof_streak']}")
+                            else:
+                                self.objects[object_id]["liveness"] = "real"
+                                self.objects[object_id]["spoof_streak"] = 0  # Reset streak on real frame
+
+                        # --- Challenge Compliance Check (runs every frame if challenge is active) ---
+                        if self.objects[object_id]["challenge_state"] == "active" and self.objects[object_id]["challenge_baseline"] is not None:
+                            baseline_nx, baseline_ny = self.objects[object_id]["challenge_baseline"]
+                            instruction = self.objects[object_id]["challenge_instruction"]
+                            complied = False
+                            if instruction == "LEFT"  and nose_x < baseline_nx - 0.07: complied = True
+                            elif instruction == "RIGHT" and nose_x > baseline_nx + 0.07: complied = True
+                            elif instruction == "UP"   and nose_y < baseline_ny - 0.06: complied = True
+                            elif instruction == "DOWN"  and nose_y > baseline_ny + 0.06: complied = True
+
+                            if complied:
+                                self.objects[object_id]["challenge_compliance_frames"] += 1
+                                # Require 5 consecutive compliant frames to confirm human
+                                if self.objects[object_id]["challenge_compliance_frames"] >= 5:
+                                    self.objects[object_id]["challenge_state"] = "verified_real"
+                                    self.objects[object_id]["liveness"] = "real"
+                                    self.objects[object_id]["spoof_streak"] = 0
+                                    self.objects[object_id]["aws_status"] = "unknown"  # Re-open AWS gate
+                                    self.objects[object_id]["aws_calls"] = 0
+                                    print(f"[CHALLENGE] ✅ Face {object_id} passed challenge: {instruction}")
+                            else:
+                                # Decay compliance frames if not actively complying
+                                self.objects[object_id]["challenge_compliance_frames"] = max(0, self.objects[object_id]["challenge_compliance_frames"] - 1)
 
                 used_rows.add(row)
                 used_cols.add(col)
