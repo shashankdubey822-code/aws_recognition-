@@ -48,6 +48,12 @@ const BOX_FADEOUT_MS = 2000;
 // --- TOAST NOTIFICATION SYSTEM ---
 function showToast(message, type = 'info') {
     const container = document.getElementById('toast-container');
+    
+    // AGI Fix: Enforce strict First-In-First-Out (FIFO) queue of max 3 toasts to prevent screen spam
+    while (container.children.length >= 3) {
+        container.removeChild(container.firstChild);
+    }
+
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     
@@ -237,11 +243,49 @@ function drawSmoothFaces() {
         const mirroredX = overlayCanvas.width - x - w;
         
         let color = '#ef4444'; // Red
-        if (face.status === 'match') color = '#10b981'; // Green
-        else if (face.status === 'verifying') color = '#00d2ff'; // Cyan
+        let alpha = age > 200 ? Math.max(0, 1 - ((age - 200) / 1000)) : 1;
+        
+        // AGI FIX: If match is successful, the massive target box shrinks down to a small, sleek marker 
+        // falling back to capturing the original full-screen size visually.
+        if (face.status === 'match') {
+            color = '#10b981'; // Green
+            overlayCtx.globalAlpha = alpha;
+            
+            // Minimalist verified marker
+            overlayCtx.beginPath();
+            overlayCtx.arc(mirroredX + w/2, y + h/2 - 20, 15, 0, Math.PI * 2);
+            overlayCtx.fillStyle = color;
+            overlayCtx.fill();
+            overlayCtx.lineWidth = 2;
+            overlayCtx.strokeStyle = 'white';
+            overlayCtx.stroke();
+            
+            // Checkmark inside the marker
+            overlayCtx.beginPath();
+            overlayCtx.moveTo(mirroredX + w/2 - 5, y + h/2 - 20);
+            overlayCtx.lineTo(mirroredX + w/2 - 1, y + h/2 - 15);
+            overlayCtx.lineTo(mirroredX + w/2 + 6, y + h/2 - 25);
+            overlayCtx.strokeStyle = 'white';
+            overlayCtx.lineWidth = 3;
+            overlayCtx.lineCap = 'round';
+            overlayCtx.stroke();
+
+            // Label
+            overlayCtx.fillStyle = 'rgba(0,0,0,0.8)';
+            const labelText = `${face.name.replace(/_/g, ' ')}`;
+            overlayCtx.font = 'bold 11px "Orbitron", monospace';
+            const textWidth = overlayCtx.measureText(labelText).width;
+            overlayCtx.fillRect(mirroredX + w/2 - textWidth/2 - 10, y + h/2 + 5, textWidth + 20, 20);
+            
+            overlayCtx.fillStyle = color;
+            overlayCtx.fillText(labelText, mirroredX + w/2 - textWidth/2, y + h/2 + 19);
+            overlayCtx.globalAlpha = 1.0;
+            continue;
+        }
+        
+        if (face.status === 'verifying') color = '#00d2ff'; // Cyan
         else if (face.status === 'spoof') color = '#ff0000'; // Pure Red
         
-        let alpha = age > 200 ? Math.max(0, 1 - ((age - 200) / 1000)) : 1;
         if (face.status === 'spoof' && Date.now() % 500 < 250) alpha = 0.2; // Flash effect
         
         drawHighTechCorners(overlayCtx, mirroredX, y, w, h, color, alpha);

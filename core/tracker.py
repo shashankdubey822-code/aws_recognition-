@@ -100,7 +100,7 @@ class CentroidTracker:
                         ny = (pt["y"] - b["y"]) / (b["h"] + 1e-6)
                         norm_lm.append((nx, ny))
                     
-                    # 3D Parallax Calculation (Inter-Landmark Distance Ratio)
+                    # 3D Parallax Calculation & Center of Mass Drift
                     if len(norm_lm) >= 3:
                         re_x, re_y = norm_lm[0] # Right Eye
                         le_x, le_y = norm_lm[1] # Left Eye
@@ -110,19 +110,26 @@ class CentroidTracker:
                         dist_right = math.sqrt((nose_x - re_x)**2 + (nose_y - re_y)**2)
                         
                         ratio = dist_left / (dist_right + 1e-6)
-                        self.objects[object_id]["landmarks_history"].append(ratio)
                         
-                    if len(self.objects[object_id]["landmarks_history"]) > 10:
+                        # Store both the ratio and the normalized nose X coordinate (Drift)
+                        self.objects[object_id]["landmarks_history"].append((ratio, nose_x))
+                        
+                    if len(self.objects[object_id]["landmarks_history"]) > 15:
                         self.objects[object_id]["landmarks_history"].pop(0)
                         
                     hist = self.objects[object_id]["landmarks_history"]
-                    if len(hist) >= 5 and self.objects[object_id]["liveness"] == "pending":
-                        ratio_variance = float(np.var(hist))
-                        # A real 3D head undergoes natural micro-parallax (>0.00005)
-                        # A flat 2D photo keeps ratios mathematically identical (~0.0000)
-                        if ratio_variance < 0.00005:
+                    if len(hist) >= 10:
+                        ratios = [h[0] for h in hist]
+                        nose_xs = [h[1] for h in hist]
+                        
+                        ratio_variance = float(np.var(ratios))
+                        nose_drift = float(np.var(nose_xs))
+                        
+                        # CONTINUOUS EVALUATION (No "pending" lock)
+                        # Threshold 0.0002 filters out MediaPipe AI Jitter!
+                        if ratio_variance < 0.0002 and nose_drift < 0.00005:
                             self.objects[object_id]["liveness"] = "spoof"
-                            print(f"[AGI SHIELD] 🛑 2D Flat Photo detected! (Parallax Variance: {ratio_variance:.6f})")
+                            print(f"[AGI SHIELD] 🛑 2D Photo Detected! (Parallax: {ratio_variance:.6f}, Drift: {nose_drift:.6f})")
                         else:
                             self.objects[object_id]["liveness"] = "real"
 
@@ -141,15 +148,22 @@ class CentroidTracker:
             unused_cols = set(range(0, D.shape[1])).difference(used_cols)
             for col in unused_cols:
                 self.register(input_centroids[col], rects[col]["box"])
-                # Add initial landmarks
-                if "landmarks" in rects[col] and len(rects[col]["landmarks"]) > 0:
+                # Add initial landmarks properly formatted as (ratio, nose_x)
+                if "landmarks" in rects[col] and len(rects[col]["landmarks"]) >= 3:
                     lm = rects[col]["landmarks"]
                     b = rects[col]["box"]
-                    norm_lm = []
-                    for pt in lm:
-                        nx = (pt["x"] - b["x"]) / (b["w"] + 1e-6)
-                        ny = (pt["y"] - b["y"]) / (b["h"] + 1e-6)
-                        norm_lm.append((nx, ny))
-                    self.objects[self.next_object_id - 1]["landmarks_history"].append(norm_lm)
+                    
+                    re_nx = (lm[0]["x"] - b["x"]) / (b["w"] + 1e-6)
+                    re_ny = (lm[0]["y"] - b["y"]) / (b["h"] + 1e-6)
+                    le_nx = (lm[1]["x"] - b["x"]) / (b["w"] + 1e-6)
+                    le_ny = (lm[1]["y"] - b["y"]) / (b["h"] + 1e-6)
+                    nose_nx = (lm[2]["x"] - b["x"]) / (b["w"] + 1e-6)
+                    nose_ny = (lm[2]["y"] - b["y"]) / (b["h"] + 1e-6)
+
+                    dist_left = math.sqrt((nose_nx - le_nx)**2 + (nose_ny - le_ny)**2)
+                    dist_right = math.sqrt((nose_nx - re_nx)**2 + (nose_ny - re_ny)**2)
+                    ratio = dist_left / (dist_right + 1e-6)
+                    
+                    self.objects[self.next_object_id - 1]["landmarks_history"].append((ratio, nose_nx))
 
         return self.objects
