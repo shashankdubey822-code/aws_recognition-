@@ -86,6 +86,11 @@ class CentroidTracker:
                 self.disappeared[object_id] = 0
                 
                 # Update landmarks history and compute liveness
+                # Immediate FFT Rejection for Video Spoofing
+                if rects[col].get("fft_max_hf", 0) > 250:
+                    self.objects[object_id]["liveness"] = "spoof"
+                    print(f"[AGI SHIELD] 🛑 Digital Screen / Video Replay detected! (FFT Peak: {rects[col].get('fft_max_hf'):.2f})")
+                    
                 if "landmarks" in rects[col] and len(rects[col]["landmarks"]) > 0:
                     lm = rects[col]["landmarks"]
                     b = rects[col]["box"]

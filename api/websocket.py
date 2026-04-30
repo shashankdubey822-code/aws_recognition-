@@ -31,8 +31,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 payload = json.loads(data)
 
                 if payload.get("type") == "start_registration":
+                    import random
                     name = payload.get("name")
-                    registration_sessions[websocket] = {"name": name, "frames": 0}
+                    # Generate a random 3-step sequence for AGI active liveness
+                    seq = random.sample(["LEFT", "RIGHT", "UP", "DOWN"], 3)
+                    registration_sessions[websocket] = {"name": name, "frames": 0, "sequence": seq}
                     continue
 
                 if payload.get("type") == "register_frame":
@@ -61,30 +64,46 @@ async def websocket_endpoint(websocket: WebSocket):
                         await websocket.send_json({"type": "registration_waiting", "message": "Camera out of focus. Please hold still.", "progress": int((session["frames"]/20)*100)})
                         continue
                         
-                    # --- ACTIVE LIVENESS (SIMON SAYS) ---
-                    nose_x = None
+                    # --- ACTIVE LIVENESS (RANDOMIZED SIMON SAYS) ---
+                    nose_x, nose_y = None, None
                     if "landmarks" in face and len(face["landmarks"]) > 2:
                         nose_x = face["landmarks"][2]["x"]
+                        nose_y = face["landmarks"][2]["y"]
                         
-                    if nose_x is not None:
+                    if nose_x is not None and nose_y is not None:
                         bbox = face["box"]
                         nose_rel_x = (nose_x - bbox["x"]) / (bbox["w"] + 1e-6)
+                        nose_rel_y = (nose_y - bbox["y"]) / (bbox["h"] + 1e-6)
                         frames = session["frames"]
                         
                         if frames < 5:
-                            if not (0.35 < nose_rel_x < 0.65):
+                            if not (0.35 < nose_rel_x < 0.65 and 0.35 < nose_rel_y < 0.65):
                                 await websocket.send_json({"type": "registration_waiting", "message": "Maintain Center Lock. Look straight ahead.", "progress": int((frames/20)*100)})
                                 continue
-                        elif 5 <= frames < 12:
-                            # Nose shifted right relative to box (meaning looking left, usually)
-                            if nose_rel_x < 0.55: 
-                                await websocket.send_json({"type": "registration_waiting", "message": "Turn head LEFT to continue.", "progress": int((frames/20)*100)})
-                                continue
-                        elif 12 <= frames < 18:
-                            # Nose shifted left relative to box
-                            if nose_rel_x > 0.45:
-                                await websocket.send_json({"type": "registration_waiting", "message": "Turn head RIGHT to continue.", "progress": int((frames/20)*100)})
-                                continue
+                        else:
+                            step = 0
+                            if 5 <= frames < 10: step = 0
+                            elif 10 <= frames < 15: step = 1
+                            elif 15 <= frames < 20: step = 2
+                            
+                            current_challenge = session.get("sequence", ["LEFT", "RIGHT", "UP"])[step]
+                            
+                            if current_challenge == "LEFT":
+                                if nose_rel_x < 0.55: 
+                                    await websocket.send_json({"type": "registration_waiting", "message": "Turn head LEFT to continue.", "progress": int((frames/20)*100)})
+                                    continue
+                            elif current_challenge == "RIGHT":
+                                if nose_rel_x > 0.45:
+                                    await websocket.send_json({"type": "registration_waiting", "message": "Turn head RIGHT to continue.", "progress": int((frames/20)*100)})
+                                    continue
+                            elif current_challenge == "UP":
+                                if nose_rel_y > 0.45: # Nose moves UP -> Y decreases
+                                    await websocket.send_json({"type": "registration_waiting", "message": "Tilt head UP to continue.", "progress": int((frames/20)*100)})
+                                    continue
+                            elif current_challenge == "DOWN":
+                                if nose_rel_y < 0.55: # Nose moves DOWN -> Y increases
+                                    await websocket.send_json({"type": "registration_waiting", "message": "Tilt head DOWN to continue.", "progress": int((frames/20)*100)})
+                                    continue
 
                     # --- IDENTITY GUARD ---
                     if session["frames"] == 0:

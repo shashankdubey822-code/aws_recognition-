@@ -48,20 +48,33 @@ def detect_faces_crowd(image_bytes):
                 except Exception:
                     pass # Failsafe: if landmarks missing, return empty list
                 
-                # Environmental Analysis (Brightness & Blur)
+                # Environmental Analysis (Brightness & Blur) & FFT Anti-Spoofing
                 try:
                     gray_crop = cv2.cvtColor(face_crop, cv2.COLOR_BGR2GRAY)
                     brightness = float(np.mean(gray_crop))
                     blur = float(cv2.Laplacian(gray_crop, cv2.CV_64F).var())
+                    
+                    # FFT to detect high-frequency repeating grids (Digital Screens / Moiré patterns)
+                    f_transform = np.fft.fft2(gray_crop)
+                    f_shift = np.fft.fftshift(f_transform)
+                    magnitude_spectrum = 20 * np.log(np.abs(f_shift) + 1e-8)
+                    
+                    # Mask out the low frequencies (center 20x20 pixels)
+                    h_crop, w_crop = gray_crop.shape
+                    cy, cx = h_crop // 2, w_crop // 2
+                    magnitude_spectrum[max(0, cy-10):cy+10, max(0, cx-10):cx+10] = 0
+                    
+                    fft_max_hf = float(np.max(magnitude_spectrum))
                 except:
-                    brightness, blur = 100.0, 100.0 # Failsafe defaults
+                    brightness, blur, fft_max_hf = 100.0, 100.0, 0.0 # Failsafe defaults
                 
                 face_data.append({
                     "box": {"x": bbox.xmin, "y": bbox.ymin, "w": bbox.width, "h": bbox.height},
                     "landmarks": landmarks,
                     "bytes": crop_bytes,
                     "brightness": brightness,
-                    "blur": blur
+                    "blur": blur,
+                    "fft_max_hf": fft_max_hf
                 })
                 
         return face_data
