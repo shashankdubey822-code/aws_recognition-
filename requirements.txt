@@ -12,6 +12,9 @@ numpy==1.26.4
 pandas
 mediapipe==0.10.11
 
+# Liveness Engine (MiniFASNet ONNX — CPU Optimized)
+onnxruntime
+
 # AWS SDK (The Core Engine)
 boto3==1.34.0
 python-dotenv==1.0.0

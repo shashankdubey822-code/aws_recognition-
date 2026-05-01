@@ -12,9 +12,16 @@ os.makedirs("static/intruders", exist_ok=True)
 from services.aws_client import search_face_on_aws, register_face_to_aws
 from services.attendance import mark_attendance
 from services.face_detector import detect_faces_crowd
+from services.liveness_engine import score_liveness, warmup
 from core.state import DB_PATH
 from core.config import MIN_FACE_AREA
 from core.tracker import CentroidTracker
+
+# Pre-warm MiniFASNet model into RAM on startup
+try:
+    warmup()
+except Exception as e:
+    print(f"[LIVENESS] Warmup skipped: {e}")
 
 registration_sessions = {}
 # Global tracker instance per websocket (or global if needed, but per-websocket is safer for multiple cameras)
@@ -146,10 +153,30 @@ async def websocket_endpoint(websocket: WebSocket):
                             valid_faces.append(face)
 
                     tracker = trackers[websocket]
-                    
-                    # Update tracker
+
+                    # Update tracker geometry (centroid matching)
                     tracked_objects = tracker.update(valid_faces)
-                    
+
+                    # --- MINIFASNET LIVENESS SCORING (async, per face) ---
+                    # Score each visible face and inject into tracker
+                    liveness_tasks = []
+                    liveness_ids   = []
+                    for object_id, obj in tracked_objects.items():
+                        # Skip faces already confirmed by challenge or fully verified
+                        if obj["challenge_state"] in ("verified_real", "active"):
+                            continue
+                        # Find the matching face crop bytes
+                        for vf in valid_faces:
+                            if vf["box"]["x"] == obj["box"]["x"] and vf["box"]["y"] == obj["box"]["y"]:
+                                liveness_tasks.append(asyncio.to_thread(score_liveness, vf["bytes"]))
+                                liveness_ids.append(object_id)
+                                break
+
+                    if liveness_tasks:
+                        liveness_scores = await asyncio.gather(*liveness_tasks)
+                        for obj_id, ls in zip(liveness_ids, liveness_scores):
+                            tracker.inject_liveness_score(obj_id, ls)
+
                     client_faces = []
                     search_tasks = []
                     search_object_ids = []
