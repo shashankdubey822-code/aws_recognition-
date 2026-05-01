@@ -39,7 +39,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 payload = json.loads(data)
 
                 if payload.get("type") == "start_registration":
-                    import random
                     name = payload.get("name")
                     # Generate a random 3-step sequence for AGI active liveness
                     seq = random.sample(["LEFT", "RIGHT", "UP", "DOWN"], 3)
