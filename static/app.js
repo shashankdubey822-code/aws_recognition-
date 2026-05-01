@@ -45,6 +45,10 @@ let trackedFaces = {};
 const LERP_FACTOR = 0.3; 
 const BOX_FADEOUT_MS = 2000; 
 
+// --- SHARED UI STATE ---
+let lastSpeechMsg = "";
+let lastSpeechTime = 0;
+
 // --- CHALLENGE-RESPONSE STATE ---
 let activeChallenges = {}; // face_id -> { instruction, deadline, element }
 
@@ -539,7 +543,7 @@ function connectWebSocket() {
             return;
         }
 
-        if (data.type === 'registration_status') {
+        else if (data.type === 'registration_status') {
             isProcessing = false;
 
             if (data.progress > regProgress) {
@@ -550,6 +554,13 @@ function connectWebSocket() {
 
             regProgress = data.progress;
             regSubtext.textContent = `${data.message}`;
+
+            // AGI Voice Coach: Speak any new instruction
+            if (data.message !== lastSpeechMsg && (Date.now() - lastSpeechTime > 3000)) {
+                speakWarning(data.message);
+                lastSpeechMsg = data.message;
+                lastSpeechTime = Date.now();
+            }
 
             if (regProgress < 5) {
                 regInstruction.textContent = "Maintain Center Lock";
@@ -576,13 +587,11 @@ function connectWebSocket() {
             isProcessing = false;
             regSubtext.textContent = data.message;
             
-            // Auto-Coaching Audio Feedback
-            const msgLower = data.message.toLowerCase();
-            if (msgLower.includes("dark") || msgLower.includes("focus") || msgLower.includes("turn") || msgLower.includes("center")) {
-                if (!window.lastSpeakTime || Date.now() - window.lastSpeakTime > 4000) {
-                    speakWarning(data.message);
-                    window.lastSpeakTime = Date.now();
-                }
+            // AGI Voice Coach: Speak any coaching message (Fixes missing UP/DOWN voice)
+            if (data.message !== lastSpeechMsg || (Date.now() - lastSpeechTime > 3000)) {
+                speakWarning(data.message);
+                lastSpeechMsg = data.message;
+                lastSpeechTime = Date.now();
             }
         } 
         else if (data.type === 'registration_success') {
