@@ -1,4 +1,5 @@
 import math
+import time
 import collections
 
 class CentroidTracker:
@@ -24,12 +25,18 @@ class CentroidTracker:
             "score": 0.0,
             "landmarks_history": [],
             "liveness": "pending",
-            # --- Challenge-Response Liveness State Machine ---
-            "spoof_streak": 0,           # consecutive frames detected as spoof
-            "challenge_state": None,     # None | "active" | "verified_real" | "verified_spoof"
-            "challenge_instruction": None, # "LEFT" | "RIGHT" | "UP" | "DOWN"
-            "challenge_baseline": None,  # (nose_x, nose_y) captured at challenge start
-            "challenge_compliance_frames": 0  # consecutive frames compliance is detected
+            # Challenge-Response state machine
+            "spoof_streak": 0,
+            "challenge_state": None,
+            "challenge_instruction": None,
+            "challenge_baseline": None,
+            "challenge_compliance_frames": 0,
+            # Blink Gate
+            "blink_detected": False,
+            "last_blink_time": 0.0,
+            "tracked_since": time.time(),
+            # Z-Depth Gate
+            "z_variance": None,
         }
         self.disappeared[self.next_object_id] = 0
         self.next_object_id += 1
@@ -131,17 +138,48 @@ class CentroidTracker:
                         ratio_variance = float(np.var(ratios))
                         nose_drift = float(np.var(nose_xs))
                         
-                        # CONTINUOUS EVALUATION (No "pending" lock)
-                        # Threshold 0.0002 filters out MediaPipe AI Jitter!
-                        # Only evaluate if NOT currently in an active challenge
+                        # ── GATE 1: Parallax / Drift (photo shake exploit fix) ──
+                        # Only evaluate if NOT in an active challenge
                         if self.objects[object_id]["challenge_state"] != "active":
-                            if ratio_variance < 0.0002 and nose_drift < 0.00005:
+
+                            # GATE 2: EAR Blink Detection
+                            ear = rects[col].get("ear")
+                            if ear is not None and ear < 0.22:
+                                self.objects[object_id]["blink_detected"] = True
+                                self.objects[object_id]["last_blink_time"] = time.time()
+                                print(f"[BLINK] 👁 Face {object_id} blinked! EAR={ear:.3f}")
+
+                            # GATE 3: Z-Depth Variance
+                            z_var = rects[col].get("z_variance")
+                            if z_var is not None:
+                                self.objects[object_id]["z_variance"] = z_var
+
+                            # ── 3-LAYER LIVENESS DECISION ──
+                            face_age    = time.time() - self.objects[object_id].get("tracked_since", time.time())
+                            blink_ever  = self.objects[object_id]["blink_detected"]
+                            grace_ok    = face_age < 6.0          # 6-second grace window
+                            no_blink    = not blink_ever and not grace_ok
+
+                            cur_z_var   = self.objects[object_id].get("z_variance")
+                            flat_surface = cur_z_var is not None and cur_z_var < 0.00008
+
+                            parallax_fail = ratio_variance < 0.0002 and nose_drift < 0.00005
+
+                            if flat_surface:
                                 self.objects[object_id]["liveness"] = "spoof"
                                 self.objects[object_id]["spoof_streak"] += 1
-                                print(f"[AGI SHIELD] 🛑 2D Photo Suspected! (Parallax: {ratio_variance:.6f}, Drift: {nose_drift:.6f}) Streak: {self.objects[object_id]['spoof_streak']}")
+                                print(f"[DEPTH SHIELD] 🛑 Flat surface! z_var={cur_z_var:.6f}")
+                            elif no_blink:
+                                self.objects[object_id]["liveness"] = "spoof"
+                                self.objects[object_id]["spoof_streak"] += 1
+                                print(f"[BLINK SHIELD] 🛑 No blink in {face_age:.1f}s")
+                            elif parallax_fail:
+                                self.objects[object_id]["liveness"] = "spoof"
+                                self.objects[object_id]["spoof_streak"] += 1
+                                print(f"[PARALLAX SHIELD] 🛑 Parallax={ratio_variance:.6f} Drift={nose_drift:.6f}")
                             else:
                                 self.objects[object_id]["liveness"] = "real"
-                                self.objects[object_id]["spoof_streak"] = 0  # Reset streak on real frame
+                                self.objects[object_id]["spoof_streak"] = 0
 
                         # --- Challenge Compliance Check (runs every frame if challenge is active) ---
                         if self.objects[object_id]["challenge_state"] == "active" and self.objects[object_id]["challenge_baseline"] is not None:
