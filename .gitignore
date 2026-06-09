@@ -54,3 +54,9 @@ Thumbs.db
 
 # --- Local Deployment Scripts ---
 deploy.bat
+
+# --- Project Specific & AI Data ---
+static/intruders/
+attendance_log.csv
+project_ast_graph.json
+.gemini/
