@@ -4,8 +4,6 @@ import mediapipe as mp
 
 # --- ROBUST MULTI-FACE DETECTOR ---
 mp_face_detection = mp.solutions.face_detection
-# model_selection=1: Optimized for crowds within 5 meters
-detector = mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.4)
 
 def detect_faces_crowd(image_bytes):
     """Detects ALL faces and returns individual crops for processing."""
@@ -16,12 +14,15 @@ def detect_faces_crowd(image_bytes):
 
         h, w, _ = img.shape
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        results = detector.process(img_rgb)
+        
+        # Instantiate detector per call to prevent timestamp mismatch in C++ graph across async threads
+        with mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.4) as detector:
+            results = detector.process(img_rgb)
 
-        face_data = []
-        if results.detections:
-            for detection in results.detections:
-                bbox = detection.location_data.relative_bounding_box
+            face_data = []
+            if results.detections:
+                for detection in results.detections:
+                    bbox = detection.location_data.relative_bounding_box
 
                 # Pixel coordinates with 15% padding
                 pad = 0.15

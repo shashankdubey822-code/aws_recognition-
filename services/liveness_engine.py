@@ -12,31 +12,14 @@ import cv2
 import numpy as np
 import mediapipe as mp
 
-# Lazy load FaceMesh so it doesn't slow down global imports
-_face_mesh = None
-
-def _get_mesh():
-    global _face_mesh
-    if _face_mesh is None:
-        _face_mesh = mp.solutions.face_mesh.FaceMesh(
-            static_image_mode=True, 
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=0.5
-        )
-    return _face_mesh
-
 def warmup():
-    """Initializes FaceMesh into RAM."""
-    _get_mesh()
+    """Warmup helper maintained for compatibility."""
+    pass
 
 def score_liveness(face_crop_bytes: bytes) -> float:
     """
     Analyzes the 3D geometry of the face crop to determine liveness.
     Uses Scale-Invariant Depth to work flawlessly at any distance (0.5m to 5m).
-    
-    Returns:
-        float: 0.0 (definitely SPOOF/FLAT) to 1.0 (definitely REAL/3D)
     """
     try:
         # Decode image
@@ -46,15 +29,16 @@ def score_liveness(face_crop_bytes: bytes) -> float:
             return 0.5
 
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        
-        # --- DISTANCE IMMUNITY: Bounding Box Upscaling ---
-        # If the person is 2+ meters away, their face crop might only be 50x50 pixels.
-        # We physically upscale it to 256x256 using Cubic interpolation.
-        # This gives FaceMesh maximum sub-pixel accuracy and eliminates jitter.
         img_resized = cv2.resize(img_rgb, (256, 256), interpolation=cv2.INTER_CUBIC)
         
-        mesh = _get_mesh()
-        results = mesh.process(img_resized)
+        # Instantiate FaceMesh context per inference to prevent MediaPipe C++ graph timestamp error
+        with mp.solutions.face_mesh.FaceMesh(
+            static_image_mode=True, 
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.5
+        ) as mesh:
+            results = mesh.process(img_resized)
 
         if not results.multi_face_landmarks:
             return 0.5 # Neutral if mesh fails
