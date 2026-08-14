@@ -60,3 +60,6 @@ static/intruders/
 attendance_log.csv
 project_ast_graph.json
 .gemini/
+*.pt
+yolo_test*
+

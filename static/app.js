@@ -20,8 +20,13 @@ const regOverlay = document.getElementById('reg-overlay');
 const regInstruction = document.getElementById('reg-instruction');
 const regSubtext = document.getElementById('reg-subtext');
 
+const cameraSelect = document.getElementById('camera-select');
+
 let ws;
 let isProcessing = false;
+let currentStream = null;
+let isFrontCamera = true;
+let availableCameras = [];
 let frameCount = 0;
 let lastFpsTime = Date.now();
 let reconnectAttempts = 0;
@@ -344,7 +349,8 @@ function drawSmoothFaces() {
         face.currentBox.h += (face.targetBox.h - face.currentBox.h) * LERP_FACTOR;
 
         let { x, y, w, h } = face.currentBox;
-        const mirroredX = overlayCanvas.width - x - w;
+        // Apply horizontal mirror flip ONLY if using the front/user camera
+        const renderX = isFrontCamera ? (overlayCanvas.width - x - w) : x;
         
         let color = '#ef4444'; // Red
         let alpha = age > 200 ? Math.max(0, 1 - ((age - 200) / 1000)) : 1;
@@ -357,7 +363,7 @@ function drawSmoothFaces() {
             
             // Minimalist verified marker
             overlayCtx.beginPath();
-            overlayCtx.arc(mirroredX + w/2, y + h/2 - 20, 15, 0, Math.PI * 2);
+            overlayCtx.arc(renderX + w/2, y + h/2 - 20, 15, 0, Math.PI * 2);
             overlayCtx.fillStyle = color;
             overlayCtx.fill();
             overlayCtx.lineWidth = 2;
@@ -366,9 +372,9 @@ function drawSmoothFaces() {
             
             // Checkmark inside the marker
             overlayCtx.beginPath();
-            overlayCtx.moveTo(mirroredX + w/2 - 5, y + h/2 - 20);
-            overlayCtx.lineTo(mirroredX + w/2 - 1, y + h/2 - 15);
-            overlayCtx.lineTo(mirroredX + w/2 + 6, y + h/2 - 25);
+            overlayCtx.moveTo(renderX + w/2 - 5, y + h/2 - 20);
+            overlayCtx.lineTo(renderX + w/2 - 1, y + h/2 - 15);
+            overlayCtx.lineTo(renderX + w/2 + 6, y + h/2 - 25);
             overlayCtx.strokeStyle = 'white';
             overlayCtx.lineWidth = 3;
             overlayCtx.lineCap = 'round';
@@ -379,10 +385,10 @@ function drawSmoothFaces() {
             const labelText = `${face.name.replace(/_/g, ' ')}`;
             overlayCtx.font = 'bold 11px "Orbitron", monospace';
             const textWidth = overlayCtx.measureText(labelText).width;
-            overlayCtx.fillRect(mirroredX + w/2 - textWidth/2 - 10, y + h/2 + 5, textWidth + 20, 20);
+            overlayCtx.fillRect(renderX + w/2 - textWidth/2 - 10, y + h/2 + 5, textWidth + 20, 20);
             
             overlayCtx.fillStyle = color;
-            overlayCtx.fillText(labelText, mirroredX + w/2 - textWidth/2, y + h/2 + 19);
+            overlayCtx.fillText(labelText, renderX + w/2 - textWidth/2, y + h/2 + 19);
             overlayCtx.globalAlpha = 1.0;
             continue;
         }
@@ -392,7 +398,7 @@ function drawSmoothFaces() {
         
         if (face.status === 'spoof' && Date.now() % 500 < 250) alpha = 0.2; // Flash effect
         
-        drawHighTechCorners(overlayCtx, mirroredX, y, w, h, color, alpha);
+        drawHighTechCorners(overlayCtx, renderX, y, w, h, color, alpha);
         
         // Target Box HUD Label
         overlayCtx.globalAlpha = alpha;
@@ -405,16 +411,16 @@ function drawSmoothFaces() {
         const textWidth = overlayCtx.measureText(labelText).width;
         
         overlayCtx.fillStyle = 'rgba(0,0,0,0.8)';
-        overlayCtx.fillRect(mirroredX, y - 25, textWidth + 20, 20);
+        overlayCtx.fillRect(renderX, y - 25, textWidth + 20, 20);
         
         overlayCtx.fillStyle = color;
-        overlayCtx.fillText(labelText, mirroredX + 10, y - 11);
+        overlayCtx.fillText(labelText, renderX + 10, y - 11);
         
         // Decorator lines
         overlayCtx.beginPath();
-        overlayCtx.moveTo(mirroredX, y - 5);
-        overlayCtx.lineTo(mirroredX - 20, y - 25);
-        overlayCtx.lineTo(mirroredX - 20, y - 50);
+        overlayCtx.moveTo(renderX, y - 5);
+        overlayCtx.lineTo(renderX - 20, y - 25);
+        overlayCtx.lineTo(renderX - 20, y - 50);
         overlayCtx.strokeStyle = color;
         overlayCtx.lineWidth = 1;
         overlayCtx.stroke();
@@ -757,19 +763,98 @@ function renderPresenceList() {
     });
 }
 
-async function startCamera() {
+async function populateCameraDevices() {
     try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        availableCameras = devices.filter(d => d.kind === 'videoinput');
+        
+        if (cameraSelect) {
+            cameraSelect.innerHTML = '';
+            if (availableCameras.length === 0) {
+                cameraSelect.innerHTML = '<option value="">NO CAMERAS FOUND</option>';
+                return;
+            }
+
+            availableCameras.forEach((cam, idx) => {
+                const option = document.createElement('option');
+                option.value = cam.deviceId;
+                let label = cam.label || `Camera ${idx + 1}`;
+                if (label.toLowerCase().includes('front') || label.toLowerCase().includes('user') || label.toLowerCase().includes('facing 0')) {
+                    label = `🤳 Front Camera (${label.slice(0, 15)})`;
+                } else if (label.toLowerCase().includes('back') || label.toLowerCase().includes('environment') || label.toLowerCase().includes('facing 1')) {
+                    label = `📷 Back Camera (${label.slice(0, 15)})`;
+                }
+                option.textContent = label;
+                cameraSelect.appendChild(option);
+            });
+        }
+    } catch (err) {
+        console.warn("Could not enumerate camera devices:", err);
+    }
+}
+
+if (cameraSelect) {
+    cameraSelect.addEventListener('change', (e) => {
+        const deviceId = e.target.value;
+        if (deviceId) {
+            logToTerminal(`Switching camera input to ID: ${deviceId.slice(0, 8)}...`, 'info');
+            startCamera(deviceId);
+        }
+    });
+}
+
+async function startCamera(selectedDeviceId = null) {
+    try {
+        if (currentStream) {
+            currentStream.getTracks().forEach(track => track.stop());
+        }
+
+        const videoConstraints = selectedDeviceId 
+            ? { deviceId: { exact: selectedDeviceId } }
+            : { facingMode: "user" };
+
         const stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { width: 640, height: 480, facingMode: "user" } 
+            video: videoConstraints 
         });
+        
+        currentStream = stream;
         video.srcObject = stream;
+
+        // Detect if active camera is front/user facing
+        const track = stream.getVideoTracks()[0];
+        const settings = track.getSettings ? track.getSettings() : {};
+        const label = (track.label || "").toLowerCase();
+        
+        if (settings.facingMode === 'user' || label.includes('front') || label.includes('user')) {
+            isFrontCamera = true;
+            video.classList.add('mirror-video');
+        } else if (settings.facingMode === 'environment' || label.includes('back') || label.includes('environment')) {
+            isFrontCamera = false;
+            video.classList.remove('mirror-video');
+        } else {
+            // Default behavior if undetermined
+            isFrontCamera = !selectedDeviceId;
+            if (isFrontCamera) video.classList.add('mirror-video');
+            else video.classList.remove('mirror-video');
+        }
+
         video.onloadedmetadata = () => {
-            canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-            overlayCanvas.width = video.videoWidth; overlayCanvas.height = video.videoHeight;
+            canvas.width = video.videoWidth; 
+            canvas.height = video.videoHeight;
+            overlayCanvas.width = video.videoWidth; 
+            overlayCanvas.height = video.videoHeight;
+            
+            // Refresh device labels once permission is granted
+            populateCameraDevices().then(() => {
+                if (selectedDeviceId && cameraSelect) {
+                    cameraSelect.value = selectedDeviceId;
+                }
+            });
+
             requestAnimationFrame(renderLoop);
         };
     } catch (err) {
-        showToast("Camera kharab h tera", "error");
+        showToast("Camera access failed or unavailable", "error");
         logToTerminal("ERROR: Camera hardware unavailable.", "error");
     }
 }

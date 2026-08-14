@@ -87,8 +87,11 @@
         #videoElement {
             width: 100%;
             height: 100%;
-            object-fit: cover;
-            transform: scaleX(-1); /* Mirror */
+            object-fit: contain;
+            background: #000;
+        }
+        .mirror-video {
+            transform: scaleX(-1);
         }
         #overlayCanvas {
             position: absolute;
@@ -147,7 +150,7 @@
     <div id="toast-container"></div>
 
     <!-- Header -->
-    <header class="glass-panel sticky top-0 z-50 border-b border-white/5 py-4 px-6 flex justify-between items-center">
+    <header class="glass-panel sticky top-0 z-50 border-b border-white/5 py-4 px-6 flex flex-wrap justify-between items-center gap-4">
         <div class="flex items-center gap-4">
             <div class="w-10 h-10 rounded-full bg-gradient-to-br from-brand-cyan to-brand-emerald flex items-center justify-center shadow-[0_0_15px_rgba(0,210,255,0.5)]">
                 <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
@@ -158,7 +161,12 @@
             </div>
         </div>
         
-        <div class="flex items-center gap-6">
+        <div class="flex flex-wrap items-center gap-4">
+            <!-- Camera Selection Dropdown -->
+            <select id="camera-select" class="bg-black/60 text-brand-cyan border border-brand-cyan/40 px-3 py-2 rounded-lg text-xs font-mono font-bold focus:outline-none focus:border-brand-cyan shadow-[0_0_10px_rgba(0,210,255,0.1)] cursor-pointer">
+                <option value="">📷 SELECT CAMERA...</option>
+            </select>
+
             <div class="flex items-center gap-2">
                 <span class="relative flex h-3 w-3">
                   <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-emerald opacity-75"></span>
