@@ -21,14 +21,12 @@ def parse_identity(raw_id: str):
     
     if "__" in clean_id:
         parts = clean_id.split("__", 1)
-        # Check if first part looks like a roll number (contains digits)
         if any(c.isdigit() for c in parts[0]):
             return parts[1].replace("_", " ").title(), parts[0].strip()
         else:
             return parts[0].replace("_", " ").title(), parts[1].strip()
     elif "_" in clean_id:
         parts = clean_id.split("_")
-        # If last part is numeric/roll number
         if parts[-1].isalnum() and any(c.isdigit() for c in parts[-1]) and len(parts) > 1:
             name = " ".join(parts[:-1]).title()
             roll = parts[-1]
@@ -62,13 +60,15 @@ def mark_attendance(raw_identity: str, image_bytes: bytes = None, device_id: str
             for e in attendance_memory
         )
         
-        # Save snapshot if image_bytes provided
+        # Save snapshot if image_bytes provided (with safe file naming)
         if image_bytes and not already_present:
             try:
                 os.makedirs("static/attendees", exist_ok=True)
                 timestamp_int = int(now)
                 safe_name = "".join(c for c in name if c.isalnum() or c in (' ', '_')).replace(" ", "_")
-                filename = f"static/attendees/{roll_number}_{safe_name}_{timestamp_int}.jpg"
+                # Sanitize roll number so slashes like 'N/A' or '2024/CS/101' become safe filenames
+                safe_roll = "".join(c for c in roll_number if c.isalnum() or c in ('_', '-')) or "NA"
+                filename = f"static/attendees/{safe_roll}_{safe_name}_{timestamp_int}.jpg"
                 with open(filename, "wb") as f:
                     f.write(image_bytes)
                 photo_path = f"/{filename}"

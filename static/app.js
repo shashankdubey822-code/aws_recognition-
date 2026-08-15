@@ -59,9 +59,12 @@ const selectedDeviceSubmeta = document.getElementById('selected-device-submeta')
 const selectedDeviceStatusBadge = document.getElementById('selected-device-status-badge');
 const selectedDeviceIndicator = document.getElementById('selected-device-indicator');
 
+// --- TRIPLE TABS INSIDE DEVICE VIEW ---
 const devTabStudentsBtn = document.getElementById('dev-tab-students-btn');
+const devTabQueueBtn = document.getElementById('dev-tab-queue-btn');
 const devTabFramesBtn = document.getElementById('dev-tab-frames-btn');
 const devPanelStudents = document.getElementById('dev-panel-students');
+const devPanelQueue = document.getElementById('dev-panel-queue');
 const devPanelFrames = document.getElementById('dev-panel-frames');
 
 const rawLightbox = document.getElementById('raw-lightbox');
@@ -89,7 +92,7 @@ let confirmedPeople = new Set();
 let allDevicesMap = {};
 let selectedDeviceId = null;
 let currentDeviceFilter = 'ALL';
-let currentDevTab = 'STUDENTS'; // 'STUDENTS' | 'FRAMES'
+let currentDevTab = 'STUDENTS'; // 'STUDENTS' | 'QUEUE' | 'FRAMES'
 
 // --- SESSION COUNTDOWN STATE ---
 let sessionTimerInterval = null;
@@ -141,9 +144,9 @@ function logToTerminal(msg, type = 'info') {
     
     let colorClass = 'text-slate-300';
     let prefix = '[-]';
-    if (type === 'error' || msg.includes('ERROR')) { colorClass = 'text-red-400 font-bold'; prefix = '[!]'; }
+    if (type === 'error' || msg.includes('ERROR') || msg.includes('Conflict')) { colorClass = 'text-red-400 font-bold'; prefix = '[!]'; }
     else if (type === 'warning' || msg.includes('WARNING')) { colorClass = 'text-amber-300 font-bold'; prefix = '[?]'; }
-    else if (type === 'success' || msg.includes('Granted')) { colorClass = 'text-emerald-400 font-bold'; prefix = '[+]'; }
+    else if (type === 'success' || msg.includes('Granted') || msg.includes('Approved') || msg.includes('Active')) { colorClass = 'text-emerald-400 font-bold'; prefix = '[+]'; }
     
     div.className = `${colorClass} flex items-start gap-2 break-all`;
     div.innerHTML = `<span class="text-slate-500 select-none">[${time}]</span> <span class="font-bold select-none">${prefix}</span> <span>${msg}</span>`;
@@ -262,7 +265,6 @@ function renderDevicesView() {
         };
 
         const studentsCount = (dev.verified_students || []).length;
-        const framesCount = (dev.raw_frames || []).length;
 
         card.innerHTML = `
             <div class="flex justify-between items-start">
@@ -308,7 +310,7 @@ function renderSelectedDeviceDetails() {
         selectedDeviceIndicator.className = `w-3 h-3 rounded-full ${dev.status === 'active' ? 'bg-brand-emerald animate-ping' : 'bg-slate-500'}`;
     }
 
-    // Render Panel A: Verified Students from this device (with Roll Number & Name)
+    // Panel A: Verified Students
     if (devPanelStudents) {
         devPanelStudents.innerHTML = '';
         const students = dev.verified_students || [];
@@ -341,7 +343,65 @@ function renderSelectedDeviceDetails() {
         }
     }
 
-    // Render Panel B: Raw Frames
+    // Panel B: Live Cropped Faces & AWS FIFO Queue
+    if (devPanelQueue) {
+        devPanelQueue.innerHTML = '';
+        const queue = dev.cropped_queue || [];
+
+        if (queue.length === 0) {
+            devPanelQueue.innerHTML = '<div class="text-center text-slate-500 py-16 font-mono text-xs">No cropped faces currently in FIFO pipeline for this device.</div>';
+        } else {
+            queue.forEach((item, idx) => {
+                let badgeClass = 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+                let statusIcon = '⏳';
+                let statusText = 'IN FIFO QUEUE';
+
+                if (item.status === 'match') {
+                    badgeClass = 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 font-bold';
+                    statusIcon = '✅';
+                    statusText = `MATCH APPROVED (${item.score || 100}%)`;
+                } else if (item.status === 'no_match') {
+                    badgeClass = 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+                    statusIcon = '❌';
+                    statusText = 'NO MATCH IN DB';
+                } else if (item.status === 'spoof') {
+                    badgeClass = 'bg-red-500/20 text-red-400 border-red-500/30 font-bold';
+                    statusIcon = '🛑';
+                    statusText = 'SPOOF BLOCKED';
+                } else if (item.status === 'scanning') {
+                    badgeClass = 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30 animate-pulse';
+                    statusIcon = '🔄';
+                    statusText = 'AWS SCANNING...';
+                }
+
+                const card = document.createElement('div');
+                card.className = 'bg-black/60 p-3 rounded-xl border border-white/10 flex items-center justify-between gap-3 animate-slideIn';
+                card.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <div class="relative w-12 h-12 rounded-lg overflow-hidden border border-white/20 bg-black flex-shrink-0">
+                            ${item.crop ? `<img src="${item.crop}" class="w-full h-full object-cover">` : '<div class="w-full h-full flex items-center justify-center text-xs">👤</div>'}
+                        </div>
+                        <div>
+                            <div class="font-bold text-white font-mono text-xs flex items-center gap-2">
+                                <span>${item.name || 'Cropped Face'}</span>
+                                ${item.roll_number && item.roll_number !== 'N/A' ? `<span class="text-[10px] text-brand-cyan font-normal font-mono">[Roll: ${item.roll_number}]</span>` : ''}
+                            </div>
+                            <div class="text-[11px] font-mono text-slate-400 mt-0.5">${item.result || 'Processing via AWS Rekognition...'}</div>
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-end gap-1 flex-shrink-0">
+                        <span class="text-[10px] font-mono px-2 py-0.5 rounded border ${badgeClass}">
+                            ${statusIcon} ${statusText}
+                        </span>
+                        <span class="text-[9px] font-mono text-slate-500">${item.time}</span>
+                    </div>
+                `;
+                devPanelQueue.appendChild(card);
+            });
+        }
+    }
+
+    // Panel C: Raw Uncropped Frames
     if (devPanelFrames) {
         devPanelFrames.innerHTML = '';
         const frames = dev.raw_frames || [];
@@ -366,21 +426,36 @@ function renderSelectedDeviceDetails() {
     }
 }
 
-// Dual tab buttons inside Device View
-if (devTabStudentsBtn && devTabFramesBtn) {
+// Triple Tab Switchers Inside Device View
+if (devTabStudentsBtn && devTabQueueBtn && devTabFramesBtn) {
     devTabStudentsBtn.onclick = () => {
         currentDevTab = 'STUDENTS';
-        devTabStudentsBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-brand-emerald/20 text-brand-emerald border border-brand-emerald/40 transition-all flex items-center gap-1.5";
-        devTabFramesBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5";
+        devTabStudentsBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-brand-emerald/20 text-brand-emerald border border-brand-emerald/40 transition-all flex items-center gap-1.5 whitespace-nowrap";
+        devTabQueueBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap";
+        devTabFramesBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap";
         devPanelStudents.classList.remove('hidden');
+        devPanelQueue.classList.add('hidden');
         devPanelFrames.classList.add('hidden');
     };
+
+    devTabQueueBtn.onclick = () => {
+        currentDevTab = 'QUEUE';
+        devTabQueueBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/40 transition-all flex items-center gap-1.5 whitespace-nowrap";
+        devTabStudentsBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap";
+        devTabFramesBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap";
+        devPanelQueue.classList.remove('hidden');
+        devPanelStudents.classList.add('hidden');
+        devPanelFrames.classList.add('hidden');
+    };
+
     devTabFramesBtn.onclick = () => {
         currentDevTab = 'FRAMES';
-        devTabFramesBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/40 transition-all flex items-center gap-1.5";
-        devTabStudentsBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5";
+        devTabFramesBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/40 transition-all flex items-center gap-1.5 whitespace-nowrap";
+        devTabStudentsBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap";
+        devTabQueueBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap";
         devPanelFrames.classList.remove('hidden');
         devPanelStudents.classList.add('hidden');
+        devPanelQueue.classList.add('hidden');
     };
 }
 
@@ -479,7 +554,6 @@ if (startScanBtn) {
         regInstruction.textContent = "INITIALIZING 3D SCAN";
         regSubtext.textContent = "Align face with camera...";
         
-        // Start camera strictly for registration
         startCamera().then(() => {
             ws.send(JSON.stringify({ 
                 type: 'start_registration', 
@@ -579,6 +653,7 @@ if (clearCacheBtn) {
                 logToTerminal("Purged stored raw frames cache from server.", "success");
                 for (const d in allDevicesMap) {
                     allDevicesMap[d].raw_frames = [];
+                    allDevicesMap[d].cropped_queue = [];
                     allDevicesMap[d].total_frames = 0;
                 }
                 updateDevicesData(Object.values(allDevicesMap));
@@ -692,6 +767,16 @@ function connectWebSocket() {
             return;
         }
 
+        // --- LIVE AWS FIFO CROPPED QUEUE UPDATE ---
+        if (data.type === 'aws_queue_update') {
+            const devId = data.device_id;
+            if (allDevicesMap[devId]) {
+                allDevicesMap[devId].cropped_queue = data.queue;
+            }
+            renderSelectedDeviceDetails();
+            return;
+        }
+
         if (data.type === 'new_raw_frame') {
             const devId = data.device_id;
             if (allDevicesMap[devId]) {
@@ -759,7 +844,6 @@ function connectWebSocket() {
             regOverlay.classList.add('hidden');
             logToTerminal(data.message, "success");
             showToast("Student Registered Successfully", "success");
-            // Stop registration camera
             if (currentStream && !isDemoRunning) {
                 currentStream.getTracks().forEach(t => t.stop());
                 currentStream = null;
@@ -792,7 +876,6 @@ function connectWebSocket() {
             showToast(`Verified: ${displayName} (${rollNumber})`, "success");
             logToTerminal(`Clearance Granted: ${displayName} [Roll: ${rollNumber}] via ${devId}`, "success");
             
-            // Also update the device's verified list
             if (allDevicesMap[devId]) {
                 if (!allDevicesMap[devId].verified_students) allDevicesMap[devId].verified_students = [];
                 allDevicesMap[devId].verified_students.unshift({
@@ -928,7 +1011,7 @@ if (cameraSelect) {
 
 // --- DEMO & SCAN RENDER LOOP ---
 function renderLoop() {
-    if (!isDemoRunning && !isRegistering) return; // Exit immediately if neither demo nor registration is active
+    if (!isDemoRunning && !isRegistering) return;
 
     frameCount++;
     if (Date.now() - lastFpsTime >= 1000) {
@@ -996,5 +1079,4 @@ if (downloadBtn) {
     });
 }
 
-// Connect WebSocket only (DO NOT START CAMERA ON LOAD)
 connectWebSocket();
