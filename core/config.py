@@ -22,7 +22,7 @@ DEFAULT_SESSION_DURATION_MIN = 50 # Default monitoring duration: 50 mins
 FRAME_RATE_LIMIT_SEC = 30.0 # 30 seconds interval between frame processing/AWS pings
 
 # --- Teacher Authentication ---
-TEACHER_EMAIL = os.getenv("TEACHER_EMAIL", "teacher@school.com")
+TEACHER_EMAIL = os.getenv("TEACHER_EMAIL", "shashankdubey822@gmail.com")
 TEACHER_PASSWORD = os.getenv("TEACHER_PASSWORD", "admin123")
 SECRET_KEY = os.getenv("SECRET_KEY", "nexus_secret_key_attendance_ai_2025")
 SESSION_COOKIE_NAME = "nexus_teacher_session"
@@ -30,6 +30,6 @@ SESSION_COOKIE_NAME = "nexus_teacher_session"
 # --- SMTP Email Configuration ---
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-SMTP_EMAIL = os.getenv("SMTP_EMAIL", "") # e.g. your_email@gmail.com
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "") # e.g. your_app_password
-TEACHER_REPORT_EMAIL = os.getenv("TEACHER_REPORT_EMAIL", "teacher@school.com")
+SMTP_EMAIL = os.getenv("SMTP_EMAIL", "") # e.g. your_email@gmail.com (or App Password)
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "") # e.g. your 16-character Google App Password
+TEACHER_REPORT_EMAIL = os.getenv("TEACHER_REPORT_EMAIL", "shashankdubey822@gmail.com")

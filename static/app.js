@@ -538,8 +538,16 @@ function connectWebSocket() {
         // --- SESSION MESSAGE HANDLERS ---
         if (data.type === 'session_started') {
             startCountdown(data.duration_minutes * 60);
-            showToast(`Monitoring session started (${data.duration_minutes}m)`, "success");
-            logToTerminal(`[SESSION] ▶️ Active: ${data.session_id} (${data.duration_minutes} mins)`, "success");
+            
+            // Clean slate for the new session (starts from 0 students)
+            confirmedPeople.clear();
+            if (confirmedList) confirmedList.innerHTML = '<div class="text-center text-slate-500/50 mt-10 text-sm font-mono tracking-widest">AWAITING VERIFICATION</div>';
+            if (sessionPresentCount) sessionPresentCount.textContent = '0';
+            for (const k in currentlyVisible) delete currentlyVisible[k];
+            renderPresenceList();
+
+            showToast(`New session started (${data.duration_minutes}m) — Records reset to 0`, "success");
+            logToTerminal(`[SESSION] ▶️ Fresh Session Active: ${data.session_id} (${data.duration_minutes} mins, 0 attendees)`, "success");
             initAudio();
             playTone(880, 'sine', 0.2);
             return;

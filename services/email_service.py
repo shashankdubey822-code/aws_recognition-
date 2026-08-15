@@ -62,7 +62,7 @@ def send_session_email_report(session_data: dict, recipient: str = None) -> tupl
     duration = session_data.get("duration_minutes", 50)
     
     if not SMTP_EMAIL or not SMTP_PASSWORD:
-        msg = f"Report saved locally to {report_path}. (SMTP credentials not configured in .env)"
+        msg = f"Report saved locally to {report_path}. (SMTP credentials not configured in .env. Target recipient: {target_email})"
         print(f"⚠️ {msg}")
         return False, msg
 
@@ -130,7 +130,7 @@ def send_session_email_report(session_data: dict, recipient: str = None) -> tupl
                     </table>
                     
                     <p style="margin-top: 25px; font-size: 12px; color: #64748b; line-height: 1.5;">
-                        📎 The full Excel report file is attached to this email. Verified biometrically via AWS Rekognition AI & anti-spoofing engine.
+                        📎 The full Excel report file is attached to this email along with student biometric verification snapshots.
                     </p>
                 </div>
             </div>
@@ -151,17 +151,20 @@ def send_session_email_report(session_data: dict, recipient: str = None) -> tupl
             attachment.add_header("Content-Disposition", f"attachment; filename={base_filename}")
             msg.attach(attachment)
             
-        # Attach student photos if available
-        for att in attendees[:5]: # Attach up to 5 verification snapshots
+        # Attach all student verification snapshots
+        for att in attendees:
             photo_rel = att.get("photo")
             if photo_rel and photo_rel.startswith("/"):
                 photo_local = photo_rel[1:]
                 if os.path.exists(photo_local):
-                    with open(photo_local, "rb") as img_file:
-                        img_data = img_file.read()
-                        img_part = MIMEImage(img_data)
-                        img_part.add_header("Content-Disposition", f"attachment; filename={os.path.basename(photo_local)}")
-                        msg.attach(img_part)
+                    try:
+                        with open(photo_local, "rb") as img_file:
+                            img_data = img_file.read()
+                            img_part = MIMEImage(img_data)
+                            img_part.add_header("Content-Disposition", f"attachment; filename={os.path.basename(photo_local)}")
+                            msg.attach(img_part)
+                    except Exception as e:
+                        print(f"⚠️ Error attaching image {photo_local}: {e}")
 
         # Connect to SMTP Server
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10)

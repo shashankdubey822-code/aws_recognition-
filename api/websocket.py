@@ -12,7 +12,7 @@ from services.liveness_engine import warmup
 from services.email_service import send_session_email_report
 from api.controllers.registration_controller import RegistrationController
 from api.controllers.tracking_controller import TrackingController
-from core.state import active_session
+from core.state import active_session, last_seen, PRESENT_IDENTITIES
 
 # Pre-warm MiniFASNet model into RAM on startup
 try:
@@ -115,6 +115,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     duration = int(payload.get("duration_minutes", 50))
                     session_id = f"SES_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
                     
+                    # Clean slate: Fresh session starts from 0 students
+                    last_seen.clear()
+                    PRESENT_IDENTITIES.clear()
+                    
                     active_session["id"] = session_id
                     active_session["active"] = True
                     active_session["duration_minutes"] = duration
@@ -129,14 +133,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Schedule auto-stop timer
                     session_timer_task = asyncio.create_task(auto_stop_session_timer(duration * 60))
                     
-                    print(f"[SESSION] ▶️ Started session {session_id} for {duration} minutes.")
+                    print(f"[SESSION] ▶️ Started fresh session {session_id} for {duration} minutes (Attendees reset to 0).")
                     
                     # Notify all clients (UI + Raspberry Pi)
                     await broadcast_json({
                         "type": "session_started",
                         "session_id": session_id,
                         "duration_minutes": duration,
-                        "start_time": active_session["start_time"]
+                        "start_time": active_session["start_time"],
+                        "reset_attendance": True
                     })
                     continue
 
