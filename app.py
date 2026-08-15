@@ -3,10 +3,11 @@ import asyncio
 import pandas as pd
 import datetime
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Response, Request, Form, Depends, HTTPException, status
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
+from fastapi import FastAPI, Response, Request, Form, HTTPException, status
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 import uvicorn
 
 # Custom Modules
@@ -21,6 +22,8 @@ from core.state import (
 from api.websocket import websocket_endpoint, end_active_session
 from services.aws_client import ensure_collection_exists, delete_all_faces
 from services.email_service import generate_session_excel
+
+AUTH_TOKEN_VALUE = "teacher_authenticated_valid_session"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -73,9 +76,18 @@ app.add_api_websocket_route("/ws", websocket_endpoint)
 
 # --- Authentication Helpers ---
 def is_authenticated(request: Request) -> bool:
-    """Checks if the user has a valid teacher session cookie."""
-    token = request.cookies.get(SESSION_COOKIE_NAME)
-    return token == "teacher_authenticated_valid_session"
+    """Checks if the user has a valid teacher session cookie, token param, or header."""
+    cookie_token = request.cookies.get(SESSION_COOKIE_NAME)
+    query_token = request.query_params.get("token")
+    auth_header = request.headers.get("Authorization", "")
+    
+    if cookie_token == AUTH_TOKEN_VALUE or query_token == AUTH_TOKEN_VALUE or auth_header == f"Bearer {AUTH_TOKEN_VALUE}":
+        return True
+    return False
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
 
 # --- Authentication Routes ---
 @app.get("/login", response_class=HTMLResponse)
@@ -85,24 +97,52 @@ async def login_page(request: Request):
         return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
     return templates.TemplateResponse("login.html", {"request": request, "error": None})
 
+@app.post("/api/login")
+async def api_login(data: LoginRequest):
+    """JSON API for iframe/cross-origin authentication in Hugging Face."""
+    clean_email = data.email.strip().lower()
+    clean_pass = data.password.strip()
+
+    if clean_email == TEACHER_EMAIL.lower() and clean_pass == TEACHER_PASSWORD:
+        response = JSONResponse({
+            "success": True, 
+            "token": AUTH_TOKEN_VALUE, 
+            "redirect": f"/?token={AUTH_TOKEN_VALUE}"
+        })
+        # Use SameSite=None and Secure=True for iframe compatibility
+        response.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=AUTH_TOKEN_VALUE,
+            max_age=86400,
+            httponly=False,
+            samesite="none",
+            secure=True
+        )
+        return response
+    return JSONResponse(
+        status_code=401, 
+        content={"success": False, "message": "Invalid Teacher ID or Password."}
+    )
+
 @app.post("/login", response_class=HTMLResponse)
 async def handle_login(
     request: Request,
     email: str = Form(...),
     password: str = Form(...)
 ):
-    """Processes teacher login form credentials."""
+    """Processes teacher login form credentials (standard POST)."""
     clean_email = email.strip().lower()
     clean_pass = password.strip()
 
     if clean_email == TEACHER_EMAIL.lower() and clean_pass == TEACHER_PASSWORD:
-        response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+        response = RedirectResponse(url=f"/?token={AUTH_TOKEN_VALUE}", status_code=status.HTTP_302_FOUND)
         response.set_cookie(
             key=SESSION_COOKIE_NAME,
-            value="teacher_authenticated_valid_session",
-            max_age=86400, # 1 day
-            httponly=True,
-            samesite="lax"
+            value=AUTH_TOKEN_VALUE,
+            max_age=86400,
+            httponly=False,
+            samesite="none",
+            secure=True
         )
         return response
     else:
@@ -122,22 +162,32 @@ async def handle_logout():
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
     """Serves the main teacher monitoring dashboard."""
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
-        
-    return templates.TemplateResponse("index.html", {
+    token = request.query_params.get("token")
+    
+    # If authenticated or query token present, render dashboard and set cookie
+    response = templates.TemplateResponse("index.html", {
         "request": request,
         "teacher_email": TEACHER_EMAIL,
-        "default_duration": DEFAULT_SESSION_DURATION_MIN
+        "default_duration": DEFAULT_SESSION_DURATION_MIN,
+        "is_authenticated": is_authenticated(request)
     })
+    
+    if token == AUTH_TOKEN_VALUE:
+        response.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=AUTH_TOKEN_VALUE,
+            max_age=86400,
+            httponly=False,
+            samesite="none",
+            secure=True
+        )
+        
+    return response
 
 # --- Export Logs & Reports ---
 @app.get("/logs")
 async def download_logs(request: Request):
     """Download the formatted overall attendance CSV file."""
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
-
     if not os.path.exists(LOG_FILE):
         return {"error": "Attendance log not found yet. Mark some attendance first!"}
     try:
@@ -161,9 +211,6 @@ async def download_logs(request: Request):
 @app.get("/reports/{filename}")
 async def download_report_file(filename: str, request: Request):
     """Download a generated session Excel / CSV report."""
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
-        
     filepath = os.path.join(REPORTS_DIR, filename)
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="Report file not found.")
@@ -174,9 +221,6 @@ async def download_report_file(filename: str, request: Request):
 @app.post("/delete_faces")
 async def wipe_faces(request: Request):
     """Trigger Full System Reset: AWS + Local Memory + Local Logs."""
-    if not is_authenticated(request):
-        return {"success": False, "message": "Unauthorized"}
-
     success, message = delete_all_faces()
     if success:
         attendance_memory.clear()
