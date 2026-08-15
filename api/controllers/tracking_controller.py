@@ -1,64 +1,81 @@
-import cv2
 import time
+import json
 import base64
-import random
 import asyncio
+import random
 from datetime import datetime
 from fastapi import WebSocket
 
-from services.detector import detect_and_crop_faces
-from services.liveness_engine import check_liveness_minifasnet
 from services.aws_client import search_face_on_aws, register_face_to_aws
 from services.attendance import mark_attendance, parse_identity
+from services.face_detector import detect_faces_crowd
+from services.liveness_engine import score_liveness
+from core.config import MIN_FACE_AREA
+from core.tracker import CentroidTracker
 from core.state import connected_devices
 
 class TrackingController:
     def __init__(self, websocket: WebSocket):
         self.websocket = websocket
-        from services.tracker import GlobalTracker
-        self.tracker = GlobalTracker()
-        self.last_intruder_time = 0
+        self.tracker = CentroidTracker(max_disappeared=15, max_distance=0.15)
 
     async def process_frame(self, payload: dict):
-        # Decode base64
         encoded_data = payload["image"].split(',')[1]
-        nparr = cv2.imdecode(cv2.np.frombuffer(base64.b64decode(encoded_data), cv2.np.uint8), cv2.IMREAD_COLOR)
+        image_bytes = base64.b64decode(encoded_data)
         
         dev_id = payload.get("device_id", "edge_device")
         dev_name = payload.get("device_name", "Edge Node")
 
-        # 1. Detection via YOLOv8 Face
-        valid_faces, raw_faces = detect_and_crop_faces(nparr)
+        # 1. Detect faces locally using Mediapipe crowd detector
+        all_faces = await asyncio.to_thread(detect_faces_crowd, image_bytes)
         
-        # 2. Update Global Centroid / Feature Tracker
-        tracked_objects = self.tracker.update(valid_faces, nparr)
-        
+        # Filter out small faces (posters/backgrounds)
+        valid_faces = []
+        for face in all_faces:
+            area = face["box"]["w"] * face["box"]["h"]
+            if area >= MIN_FACE_AREA:
+                valid_faces.append(face)
+
+        # 2. Update Centroid Tracker
+        tracked_objects = self.tracker.update(valid_faces)
+
         search_tasks = []
         search_object_ids = []
         queue_items = []
-        
+
         # 3. Liveness Analysis & Search Pipeline
         for idx, (object_id, obj) in enumerate(tracked_objects.items()):
-            # Run MiniFASNet ONNX Inference
-            crop_img = obj.get("crop")
-            if crop_img is not None and crop_img.size > 0:
-                is_real, conf = check_liveness_minifasnet(crop_img)
-                if not is_real:
-                    obj["spoof_streak"] += 1
-                    obj["liveness"] = "spoof"
-                else:
-                    obj["spoof_streak"] = max(0, obj["spoof_streak"] - 1)
-                    obj["liveness"] = "real"
+            # Liveness Scoring
+            for vf in valid_faces:
+                if vf["box"]["x"] == obj["box"]["x"] and vf["box"]["y"] == obj["box"]["y"]:
+                    liveness_score, liveness_reason = score_liveness(
+                        obj["landmarks_history"],
+                        obj["brightness_history"],
+                        obj["blur_history"],
+                        fft_val=vf.get("fft_max_hf", 0.0)
+                    )
+                    obj["liveness_score"] = liveness_score
 
-            # Intruder Capture (Unknown entity seen for >30 consecutive frames)
+                    if liveness_score < 0.40:
+                        obj["spoof_streak"] += 1
+                        if obj["spoof_streak"] >= 3:
+                            obj["liveness"] = "spoof"
+                    else:
+                        obj["spoof_streak"] = max(0, obj["spoof_streak"] - 1)
+                        if obj["spoof_streak"] == 0:
+                            obj["liveness"] = "real"
+                    break
+
+            # Intruder Capture
             if obj["liveness"] == "real" and obj["aws_status"] == "unknown" and obj["frames_active"] > 30:
                 now = time.time()
-                if now - self.last_intruder_time > 10:
+                if now - getattr(self, "last_intruder_time", 0) > 10:
                     self.last_intruder_time = now
                     for vf in valid_faces:
+                        timestamp = int(time.time())
+                        filepath = f"static/intruders/intruder_{timestamp}.jpg"
                         try:
-                            timestamp = int(now)
-                            with open(f"static/intruders/intruder_{timestamp}.jpg", "wb") as f:
+                            with open(filepath, "wb") as f:
                                 f.write(vf["bytes"])
                             await self.websocket.send_json({
                                 "type": "intruder_alert",
@@ -70,11 +87,10 @@ class TrackingController:
                         break
 
             # Liveness check before AWS
-            if obj["liveness"] == "spoof" and obj["challenge_state"] not in ("active", "verified_real"):
+            if obj["liveness"] == "spoof" and obj.get("challenge_state") not in ("active", "verified_real"):
                 obj["aws_status"] = "spoof"
                 obj["name"] = "SPOOF DETECTED"
-                
-                # Build spoof queue item
+
                 for vf in valid_faces:
                     if vf["box"]["x"] == obj["box"]["x"] and vf["box"]["y"] == obj["box"]["y"]:
                         crop_b64 = "data:image/jpeg;base64," + base64.b64encode(vf["bytes"]).decode('utf-8')
@@ -91,7 +107,7 @@ class TrackingController:
                         queue_items.append(q_item)
                         break
                 continue
-                
+
             # If face is still scanning and we haven't asked AWS 3 times
             if obj["aws_status"] == "unknown" and obj["aws_calls"] < 3 and obj["liveness"] == "real":
                 for vf in valid_faces:
@@ -99,7 +115,7 @@ class TrackingController:
                         search_tasks.append(asyncio.to_thread(search_face_on_aws, vf["bytes"]))
                         search_object_ids.append(object_id)
                         obj["aws_calls"] += 1
-                        
+
                         crop_b64 = "data:image/jpeg;base64," + base64.b64encode(vf["bytes"]).decode('utf-8')
                         q_item = {
                             "id": f"q_{int(time.time()*1000)}_{idx}",
@@ -113,7 +129,7 @@ class TrackingController:
                         }
                         queue_items.append(q_item)
                         break
-        
+
         # Run AWS calls in parallel
         if search_tasks:
             aws_results = await asyncio.gather(*search_tasks)
@@ -124,12 +140,13 @@ class TrackingController:
                     if res["status"] == "match":
                         raw_id = res["name"]
                         display_name, roll_no = parse_identity(raw_id)
-                        
+
                         self.tracker.objects[obj_id]["name"] = display_name
                         self.tracker.objects[obj_id]["roll_number"] = roll_no
                         self.tracker.objects[obj_id]["aws_status"] = "match"
                         self.tracker.objects[obj_id]["score"] = res["score"]
-                        
+
+                        # Find face image bytes for snapshot and federated update
                         matched_bytes = None
                         for vf in valid_faces:
                             if vf["box"]["x"] == self.tracker.objects[obj_id]["box"]["x"] and vf["box"]["y"] == self.tracker.objects[obj_id]["box"]["y"]:
@@ -152,7 +169,7 @@ class TrackingController:
                                 "time": s_time or "Now",
                                 "device_id": dev_id
                             })
-                            
+
                         # Update queue item result
                         if i < len(queue_items):
                             queue_items[i]["status"] = "match"
@@ -192,7 +209,7 @@ class TrackingController:
             })
 
         # --- CHALLENGE-RESPONSE ENGINE ---
-        SPOOF_STREAK_THRESHOLD = 20
+        SPOOF_STREAK_THRESHOLD = 20  # ~2 seconds of continuous spoof detection
         for object_id, obj in tracked_objects.items():
             c_state = obj.get("challenge_state")
 
@@ -206,45 +223,69 @@ class TrackingController:
 
                 self.tracker.objects[object_id]["challenge_state"] = "active"
                 self.tracker.objects[object_id]["challenge_instruction"] = instruction
-                self.tracker.objects[object_id]["challenge_start_time"] = time.time()
                 self.tracker.objects[object_id]["challenge_baseline"] = baseline
-
+                self.tracker.objects[object_id]["challenge_compliance_frames"] = 0
+                self.tracker.objects[object_id]["challenge_start_time"] = time.time()
+                print(f"[CHALLENGE] 🎯 Issuing challenge to face {object_id}: {instruction}")
                 await self.websocket.send_json({
-                    "type": "challenge_issued",
+                    "type": "challenge",
                     "face_id": object_id,
-                    "instruction": instruction,
-                    "box": obj["box"],
-                    "timeout": 5.0
+                    "instruction": instruction
                 })
 
-        # 4. Construct Response JSON
+            elif c_state == "verified_real":
+                self.tracker.objects[object_id]["challenge_state"] = None
+                await self.websocket.send_json({
+                    "type": "challenge_passed",
+                    "face_id": object_id,
+                    "message": "✅ Liveness Confirmed — Identity Verification Proceeding"
+                })
+
+            elif c_state == "active":
+                start_t = obj.get("challenge_start_time", time.time())
+                if time.time() - start_t > 15:
+                    self.tracker.objects[object_id]["challenge_state"] = "verified_spoof"
+                    self.tracker.objects[object_id]["liveness"] = "spoof"
+                    self.tracker.objects[object_id]["aws_status"] = "spoof"
+                    self.tracker.objects[object_id]["name"] = "SPOOF CONFIRMED"
+                    print(f"[CHALLENGE] ❌ Face {object_id} FAILED challenge — timeout")
+                    await self.websocket.send_json({
+                        "type": "challenge_failed",
+                        "face_id": object_id,
+                        "message": "❌ Challenge Failed — Spoof Confirmed"
+                    })
+
+        # Prepare UI Response
         client_faces = []
         for object_id, obj in tracked_objects.items():
-            display_name = obj["name"]
-            status = obj["aws_status"]
-            if obj["liveness"] == "spoof" and obj["challenge_state"] != "verified_real":
-                display_name = "SPOOF DETECTED"
-                status = "spoof"
-            elif status == "match":
-                status = "match"
-            elif status == "failed":
-                display_name = "Unknown Entity"
+            crop_str = ""
+            for vf in valid_faces:
+                if vf["box"]["x"] == obj["box"]["x"] and vf["box"]["y"] == obj["box"]["y"]:
+                    crop_str = f"data:image/jpeg;base64,{base64.b64encode(vf['bytes']).decode()}"
+                    break
 
-            crop_b64 = None
-            if obj.get("crop") is not None and obj["crop"].size > 0:
-                _, buffer = cv2.imencode('.jpg', obj["crop"])
-                crop_b64 = "data:image/jpeg;base64," + base64.b64encode(buffer).decode('utf-8')
+            display_title = obj["name"]
+            if obj.get("roll_number") and obj["roll_number"] != "N/A" and obj["name"] not in ("Scanning...", "SPOOF DETECTED", "SPOOF CONFIRMED"):
+                display_title = f"{obj['name']} ({obj['roll_number']})"
 
             client_faces.append({
                 "id": object_id,
-                "box": obj["box"],
-                "name": display_name,
-                "roll_number": obj.get("roll_number", "N/A"),
+                "name": display_title,
                 "raw_name": obj["name"],
-                "status": status,
-                "liveness": obj["liveness"],
-                "score": obj.get("score", 0),
-                "crop": crop_b64
+                "roll_number": obj.get("roll_number", "N/A"),
+                "status": obj["aws_status"] if obj["name"] != "Scanning..." else "verifying",
+                "score": obj["score"],
+                "box": {
+                    "x": int(obj["box"]["x"]*640), 
+                    "y": int(obj["box"]["y"]*480), 
+                    "w": int(obj["box"]["w"]*640), 
+                    "h": int(obj["box"]["h"]*480)
+                },
+                "crop": crop_str
             })
-            
-        await self.websocket.send_json({"type": "ready", "faces": client_faces})
+
+        await self.websocket.send_json({
+            "type": "ready", 
+            "faces": client_faces, 
+            "debug": f"Tracking {len(tracked_objects)} people"
+        })
