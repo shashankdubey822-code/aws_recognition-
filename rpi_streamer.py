@@ -12,6 +12,7 @@ Connects via WebSocket to the central attendance server.
 """
 
 import sys
+import os
 import time
 import json
 import base64
@@ -21,7 +22,7 @@ import socket
 import websockets
 import cv2
 
-DEFAULT_SERVER_WS = "ws://localhost:7860/ws"
+DEFAULT_SERVER_WS = "wss://vrfefavr-hugging-face.hf.space/ws"
 DEFAULT_INTERVAL_SEC = 30.0
 DEFAULT_CAMERA_INDEX = 0
 
@@ -37,10 +38,11 @@ def get_local_ip():
         return "127.0.0.1"
 
 class RaspberryPiEdgeClient:
-    def __init__(self, server_url: str, device_name: str, device_id: str, interval: float = 30.0, camera_index: int = 0, width: int = 640, height: int = 480):
+    def __init__(self, server_url: str, device_name: str, device_id: str, hf_token: str = None, interval: float = 30.0, camera_index: int = 0, width: int = 640, height: int = 480):
         self.server_url = server_url
         self.device_name = device_name
         self.device_id = device_id
+        self.hf_token = hf_token or os.getenv("HF_TOKEN")
         self.interval = interval
         self.camera_index = camera_index
         self.width = width
@@ -189,11 +191,23 @@ class RaspberryPiEdgeClient:
         print(f"   Interval    : {self.interval}s (Raw Frame Throttle)")
         print("="*65)
 
+        # Build extra headers if HF token is present
+        headers = {}
+        if self.hf_token:
+            headers["Authorization"] = f"Bearer {self.hf_token}"
+
         reconnect_delay = 2
         while self.is_running:
             try:
                 print(f"[EDGE] 🔗 Connecting to server at {self.server_url}...")
-                async with websockets.connect(self.server_url, ping_interval=10, ping_timeout=20) as websocket:
+                
+                # Check if websockets library supports additional_headers or extra_headers
+                try:
+                    ws_ctx = websockets.connect(self.server_url, additional_headers=headers if headers else None, ping_interval=10, ping_timeout=20)
+                except TypeError:
+                    ws_ctx = websockets.connect(self.server_url, extra_headers=headers if headers else None, ping_interval=10, ping_timeout=20)
+
+                async with ws_ctx as websocket:
                     self.ws = websocket
                     reconnect_delay = 2
                     print("✅ Connected to central server. Registering edge device...")
@@ -230,6 +244,7 @@ def main():
     parser.add_argument("--url", default=DEFAULT_SERVER_WS, help=f"WebSocket server URL (default: {DEFAULT_SERVER_WS})")
     parser.add_argument("--device", default="Raspberry Pi Classroom 01", help="Device name / Classroom Label (default: 'Raspberry Pi Classroom 01')")
     parser.add_argument("--id", default=None, help="Unique Device ID (default: auto-generated from device name)")
+    parser.add_argument("--hf-token", default=None, help="Hugging Face User Access Token (if private space)")
     parser.add_argument("--interval", type=float, default=DEFAULT_INTERVAL_SEC, help=f"Frame interval in seconds (default: {DEFAULT_INTERVAL_SEC}s)")
     parser.add_argument("--camera", type=int, default=DEFAULT_CAMERA_INDEX, help=f"Camera index (default: {DEFAULT_CAMERA_INDEX})")
     parser.add_argument("--width", type=int, default=640, help="Camera width (default: 640)")
@@ -243,6 +258,7 @@ def main():
         server_url=args.url,
         device_name=args.device,
         device_id=device_id,
+        hf_token=args.hf_token,
         interval=args.interval,
         camera_index=args.camera,
         width=args.width,
