@@ -15,14 +15,15 @@ def init_db():
     
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    # Table for persistent attendance logs with Roll Number and Session ID
     cursor.execute('''CREATE TABLE IF NOT EXISTS attendance 
                      (roll_number TEXT, name TEXT, time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, session_id TEXT, device_id TEXT)''')
-    # Table for registered faces (local metadata) with Roll Number
     cursor.execute('''CREATE TABLE IF NOT EXISTS registered_faces
                      (roll_number TEXT, name TEXT, date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (roll_number, name))''')
     conn.commit()
     conn.close()
+
+# Global WebSocket Connections
+active_connections = set()
 
 # Global Runtime State
 attendance_memory = [] # [{ "roll_number": "...", "name": "...", "time": "..." }]
@@ -37,15 +38,14 @@ active_session = {
     "duration_minutes": 50,
     "start_time": None,
     "end_time": None,
-    "attendees": [] # [{ "roll_number": "...", "name": "...", "time": "...", "photo": "...", "device_id": "..." }]
+    "attendees": []
 }
 
 # Connected & Historical Devices Registry (Supports 30+ Classrooms / Edge Pis)
-# device_id -> { "device_id", "device_name", "client_ip", "status", "first_seen", "last_seen", "total_frames", "raw_frames": [...], "verified_students": [...] }
 connected_devices = {}
 
 # Consensus & Tracking
-consensus_votes = {} # { "FaceID": ["Name", "Name", "Name"] }
-last_known_positions = {} # { "FaceID": {"x": x, "y": y, "name": name} }
+consensus_votes = {}
+last_known_positions = {}
 
 init_db()
