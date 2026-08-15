@@ -4,7 +4,7 @@ import sqlite3
 import threading
 from datetime import datetime
 from core.config import LOG_FILE, COOL_DOWN_SEC
-from core.state import attendance_memory, last_seen, active_session, DB_PATH
+from core.state import attendance_memory, last_seen, active_session, connected_devices, DB_PATH
 
 # Threading lock to prevent CSV/DB corruption during high-speed recognition
 attendance_lock = threading.Lock()
@@ -42,8 +42,8 @@ def parse_identity(raw_id: str):
     else:
         return clean_id.title(), "N/A"
 
-def mark_attendance(raw_identity: str, image_bytes: bytes = None):
-    """Business logic for attendance marking with Roll Number & active session tracking."""
+def mark_attendance(raw_identity: str, image_bytes: bytes = None, device_id: str = "edge_device"):
+    """Business logic for attendance marking with Roll Number, Device Mapping & active session tracking."""
     now = time.time()
     
     if raw_identity in last_seen and (now - last_seen[raw_identity]) < COOL_DOWN_SEC:
@@ -80,18 +80,18 @@ def mark_attendance(raw_identity: str, image_bytes: bytes = None):
                 # 1. Update CSV Log
                 if not os.path.exists(LOG_FILE):
                     with open(LOG_FILE, "w", encoding="utf-8") as f:
-                        f.write("Roll Number,Name,Time,Date,Status\n")
+                        f.write("Roll Number,Name,Time,Date,Status,Device\n")
                 
                 with open(LOG_FILE, "a", encoding="utf-8") as f:
-                    f.write(f'"{roll_number}","{name}","{time_str}","{date_str}","CLEARANCE GRANTED"\n')
+                    f.write(f'"{roll_number}","{name}","{time_str}","{date_str}","CLEARANCE GRANTED","{device_id}"\n')
                 
                 # 2. Update SQLite Database
                 try:
                     conn = sqlite3.connect(DB_PATH)
                     cursor = conn.cursor()
                     session_id = active_session["id"] if active_session.get("active") else "GENERAL"
-                    cursor.execute("INSERT INTO attendance (roll_number, name, session_id) VALUES (?, ?, ?)",
-                                   (roll_number, name, session_id))
+                    cursor.execute("INSERT INTO attendance (roll_number, name, session_id, device_id) VALUES (?, ?, ?, ?)",
+                                   (roll_number, name, session_id, device_id))
                     conn.commit()
                     conn.close()
                 except Exception as db_err:
@@ -103,13 +103,20 @@ def mark_attendance(raw_identity: str, image_bytes: bytes = None):
                     "name": name,
                     "time": time_str,
                     "date": date_str,
-                    "photo": photo_path
+                    "photo": photo_path,
+                    "device_id": device_id
                 }
                 attendance_memory.insert(0, entry)
                 
                 # 4. Add to current active monitoring session if running
                 if active_session.get("active"):
                     active_session["attendees"].append(entry)
+
+                # 5. Add to Device-Specific Verified Students list
+                if device_id in connected_devices:
+                    if "verified_students" not in connected_devices[device_id]:
+                        connected_devices[device_id]["verified_students"] = []
+                    connected_devices[device_id]["verified_students"].insert(0, entry)
                     
                 return "success", name, roll_number, time_str
             except Exception as e:

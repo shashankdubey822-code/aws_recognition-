@@ -17,7 +17,7 @@ def init_db():
     cursor = conn.cursor()
     # Table for persistent attendance logs with Roll Number and Session ID
     cursor.execute('''CREATE TABLE IF NOT EXISTS attendance 
-                     (roll_number TEXT, name TEXT, time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, session_id TEXT)''')
+                     (roll_number TEXT, name TEXT, time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, session_id TEXT, device_id TEXT)''')
     # Table for registered faces (local metadata) with Roll Number
     cursor.execute('''CREATE TABLE IF NOT EXISTS registered_faces
                      (roll_number TEXT, name TEXT, date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (roll_number, name))''')
@@ -37,23 +37,12 @@ active_session = {
     "duration_minutes": 50,
     "start_time": None,
     "end_time": None,
-    "attendees": [] # [{ "roll_number": "...", "name": "...", "time": "...", "photo": "..." }]
+    "attendees": [] # [{ "roll_number": "...", "name": "...", "time": "...", "photo": "...", "device_id": "..." }]
 }
 
 # Connected & Historical Devices Registry (Supports 30+ Classrooms / Edge Pis)
-# device_id -> { "device_id", "device_name", "client_ip", "status", "first_seen", "last_seen", "total_frames", "raw_frames": [...] }
-connected_devices = {
-    "local_web_browser": {
-        "device_id": "local_web_browser",
-        "device_name": "Web Browser Host (Local/Remote)",
-        "client_ip": "127.0.0.1",
-        "status": "standby",
-        "first_seen": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "last_seen": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "total_frames": 0,
-        "raw_frames": []
-    }
-}
+# device_id -> { "device_id", "device_name", "client_ip", "status", "first_seen", "last_seen", "total_frames", "raw_frames": [...], "verified_students": [...] }
+connected_devices = {}
 
 # Consensus & Tracking
 consensus_votes = {} # { "FaceID": ["Name", "Name", "Name"] }

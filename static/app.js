@@ -3,12 +3,12 @@ const canvas = document.getElementById('canvasElement');
 const ctx = canvas.getContext('2d', { willReadFrequently: true });
 const overlayCanvas = document.getElementById('overlayCanvas');
 const overlayCtx = overlayCanvas.getContext('2d');
-const attendanceList = document.getElementById('attendance-list');
 const confirmedList = document.getElementById('confirmed-list');
 const terminalLogs = document.getElementById('terminal-logs');
 const debugCrops = document.getElementById('debug-crops');
 const cropCount = document.getElementById('crop-count');
 const cameraSelect = document.getElementById('camera-select');
+const fpsCounter = document.getElementById('fps-counter');
 
 // --- REGISTRATION UI ELEMENTS ---
 const addStudentBtn = document.getElementById('add-student-btn');
@@ -31,14 +31,23 @@ const sessionTimerDisplay = document.getElementById('session-timer-display');
 const sessionStatusLabel = document.getElementById('session-status-label');
 const sessionIndicator = document.getElementById('session-indicator');
 const sessionPresentCount = document.getElementById('session-present-count');
+const statSessionStatus = document.getElementById('stat-session-status');
+const statActivePis = document.getElementById('stat-active-pis');
+const ledgerSessionIdLabel = document.getElementById('ledger-session-id-label');
 
-// --- TABS & DEVICES VIEW ELEMENTS ---
-const tabSurveillanceBtn = document.getElementById('tab-surveillance-btn');
+// --- TABS & VIEWS ---
+const tabDashboardBtn = document.getElementById('tab-dashboard-btn');
 const tabDevicesBtn = document.getElementById('tab-devices-btn');
-const viewSurveillance = document.getElementById('view-surveillance');
+const viewDashboard = document.getElementById('view-dashboard');
 const viewDevices = document.getElementById('view-devices');
 const activeDevicesBadge = document.getElementById('active-devices-badge');
 
+// --- DEMO TESTER MODAL ---
+const openDemoBtn = document.getElementById('open-demo-btn');
+const closeDemoBtn = document.getElementById('close-demo-btn');
+const demoModal = document.getElementById('demo-modal');
+
+// --- DEVICES VIEW ELEMENTS ---
 const statTotalDevices = document.getElementById('stat-total-devices');
 const statActiveDevices = document.getElementById('stat-active-devices');
 const statStandbyDevices = document.getElementById('stat-standby-devices');
@@ -49,8 +58,11 @@ const selectedDeviceName = document.getElementById('selected-device-name');
 const selectedDeviceSubmeta = document.getElementById('selected-device-submeta');
 const selectedDeviceStatusBadge = document.getElementById('selected-device-status-badge');
 const selectedDeviceIndicator = document.getElementById('selected-device-indicator');
-const rawFramesGallery = document.getElementById('raw-frames-gallery');
-const rawFramesCountLabel = document.getElementById('raw-frames-count-label');
+
+const devTabStudentsBtn = document.getElementById('dev-tab-students-btn');
+const devTabFramesBtn = document.getElementById('dev-tab-frames-btn');
+const devPanelStudents = document.getElementById('dev-panel-students');
+const devPanelFrames = document.getElementById('dev-panel-frames');
 
 const rawLightbox = document.getElementById('raw-lightbox');
 const lightboxImg = document.getElementById('lightbox-img');
@@ -58,52 +70,41 @@ const lightboxDeviceTitle = document.getElementById('lightbox-device-title');
 const lightboxMetaSubtitle = document.getElementById('lightbox-meta-subtitle');
 const lightboxDownloadLink = document.getElementById('lightbox-download-link');
 const lightboxCloseBtn = document.getElementById('lightbox-close-btn');
+const clearCacheBtn = document.getElementById('clear-cache-btn');
 
 let ws;
 let isProcessing = false;
 let currentStream = null;
 let isFrontCamera = true;
+let isDemoRunning = false;
 let availableCameras = [];
 let frameCount = 0;
 let lastFpsTime = Date.now();
 let reconnectAttempts = 0;
 let pingInterval;
 
-let currentlyVisible = {};
 let confirmedPeople = new Set(); 
-const VISIBILITY_TIMEOUT_MS = 3000;
 
 // --- DEVICES REGISTRY STATE ---
 let allDevicesMap = {};
 let selectedDeviceId = null;
 let currentDeviceFilter = 'ALL';
+let currentDevTab = 'STUDENTS'; // 'STUDENTS' | 'FRAMES'
 
 // --- SESSION COUNTDOWN STATE ---
 let sessionTimerInterval = null;
 let sessionRemainingSeconds = 0;
 
-// --- ADVANCED GAMIFIED REGISTRATION STATE ---
+// --- REGISTRATION STATE ---
 let isRegistering = false;
-const REQUIRED_REG_FRAMES = 20; 
 let regProgress = 0;
-let regPulseAngle = 0;
-let flashAlpha = 0; 
-let targetX = 0, targetY = 0;
-let currentDotX = 0, currentDotY = 0;
 
-// --- ADVANCED SMOOTH TRACKING STATE ---
+// --- ADVANCED TRACKING STATE ---
 let trackedFaces = {}; 
 const LERP_FACTOR = 0.3; 
 const BOX_FADEOUT_MS = 2000; 
 
-// --- SHARED UI STATE ---
-let lastSpeechMsg = "";
-let lastSpeechTime = 0;
-
-// --- CHALLENGE-RESPONSE STATE ---
-let activeChallenges = {};
-
-// --- TOAST NOTIFICATION SYSTEM ---
+// --- TOAST NOTIFICATIONS ---
 function showToast(message, type = 'info') {
     const container = document.getElementById('toast-container');
     if (!container) return;
@@ -115,11 +116,7 @@ function showToast(message, type = 'info') {
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     
-    let icon = '';
-    if (type === 'error') icon = '❌';
-    else if (type === 'success') icon = '✅';
-    else if (type === 'warning') icon = '⚠️';
-    else icon = 'ℹ️';
+    let icon = type === 'error' ? '❌' : (type === 'success' ? '✅' : (type === 'warning' ? '⚠️' : 'ℹ️'));
 
     toast.innerHTML = `
         <div class="text-xl">${icon}</div>
@@ -136,7 +133,7 @@ function showToast(message, type = 'info') {
     }, 4000);
 }
 
-// --- HACKER TERMINAL ---
+// --- HACKER AUDIT TERMINAL ---
 function logToTerminal(msg, type = 'info') {
     if (!terminalLogs) return;
     const div = document.createElement('div');
@@ -159,22 +156,50 @@ function logToTerminal(msg, type = 'info') {
     }
 }
 
-// --- TAB SWITCHING LOGIC ---
-if (tabSurveillanceBtn && tabDevicesBtn) {
-    tabSurveillanceBtn.addEventListener('click', () => {
-        tabSurveillanceBtn.className = "px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/40 shadow-[0_0_10px_rgba(0,210,255,0.2)]";
+// --- TOP TABS SWITCHER ---
+if (tabDashboardBtn && tabDevicesBtn) {
+    tabDashboardBtn.addEventListener('click', () => {
+        tabDashboardBtn.className = "px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/40 shadow-[0_0_10px_rgba(0,210,255,0.2)]";
         tabDevicesBtn.className = "px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5";
-        viewSurveillance.classList.remove('hidden');
+        viewDashboard.classList.remove('hidden');
         viewDevices.classList.add('hidden');
     });
 
     tabDevicesBtn.addEventListener('click', () => {
         tabDevicesBtn.className = "px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/40 shadow-[0_0_10px_rgba(0,210,255,0.2)] flex items-center gap-1.5";
-        tabSurveillanceBtn.className = "px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all";
+        tabDashboardBtn.className = "px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all";
         viewDevices.classList.remove('hidden');
-        viewSurveillance.classList.add('hidden');
+        viewDashboard.classList.add('hidden');
         renderDevicesView();
     });
+}
+
+// --- DEMO TESTER MODAL HANDLERS ---
+if (openDemoBtn) {
+    openDemoBtn.addEventListener('click', () => {
+        demoModal.classList.remove('hidden');
+        isDemoRunning = true;
+        logToTerminal("Starting local webcam demo tester...", "info");
+        startCamera();
+    });
+}
+
+if (closeDemoBtn) {
+    closeDemoBtn.addEventListener('click', () => {
+        stopDemoCamera();
+    });
+}
+
+function stopDemoCamera() {
+    isDemoRunning = false;
+    demoModal.classList.add('hidden');
+    if (currentStream) {
+        currentStream.getTracks().forEach(t => t.stop());
+        currentStream = null;
+    }
+    video.srcObject = null;
+    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+    logToTerminal("Local webcam tester stopped and hardware released.", "info");
 }
 
 // --- DEVICES VIEW RENDERER ---
@@ -184,10 +209,12 @@ function updateDevicesData(devicesList) {
     });
     
     const devices = Object.values(allDevicesMap);
+    const activePis = devices.filter(d => d.status === 'active' && d.device_id.startsWith('rpi_')).length;
     const activeCount = devices.filter(d => d.status === 'active').length;
     const standbyCount = devices.filter(d => d.status !== 'active').length;
     const totalFrames = devices.reduce((sum, d) => sum + (d.total_frames || 0), 0);
 
+    if (statActivePis) statActivePis.textContent = activePis;
     if (activeDevicesBadge) activeDevicesBadge.textContent = activeCount;
     if (statTotalDevices) statTotalDevices.textContent = devices.length;
     if (statActiveDevices) statActiveDevices.textContent = activeCount;
@@ -214,7 +241,7 @@ function renderDevicesView() {
     devicesCardsList.innerHTML = '';
     
     if (devices.length === 0) {
-        devicesCardsList.innerHTML = '<div class="text-center text-slate-500 py-10 font-mono text-xs">No matching devices found.</div>';
+        devicesCardsList.innerHTML = '<div class="text-center text-slate-500 py-10 font-mono text-xs">No registered edge devices connected.</div>';
         return;
     }
 
@@ -234,7 +261,9 @@ function renderDevicesView() {
             renderDevicesView();
         };
 
-        const frameCount = (dev.raw_frames || []).length;
+        const studentsCount = (dev.verified_students || []).length;
+        const framesCount = (dev.raw_frames || []).length;
+
         card.innerHTML = `
             <div class="flex justify-between items-start">
                 <div class="flex items-center gap-2.5">
@@ -249,26 +278,26 @@ function renderDevicesView() {
                     ${isActive ? 'ACTIVE' : 'STANDBY'}
                 </span>
             </div>
-            <div class="grid grid-cols-2 gap-2 text-[11px] font-mono text-slate-400 mt-1 pt-2 border-t border-white/5">
+            <div class="grid grid-cols-3 gap-2 text-[11px] font-mono text-slate-400 mt-1 pt-2 border-t border-white/5">
                 <div><span class="text-slate-500">IP:</span> ${dev.client_ip || '127.0.0.1'}</div>
+                <div><span class="text-slate-500">Students:</span> ${studentsCount}</div>
                 <div class="text-right"><span class="text-slate-500">Frames:</span> ${dev.total_frames || 0}</div>
-                <div class="col-span-2 text-[10px] text-slate-500 truncate">Last Active: ${dev.last_seen || 'N/A'}</div>
+                <div class="col-span-3 text-[10px] text-slate-500 truncate">Last Active: ${dev.last_seen || 'N/A'}</div>
             </div>
         `;
         
         devicesCardsList.appendChild(card);
     });
 
-    // Render Selected Device Raw Frames
-    renderSelectedDeviceGallery();
+    renderSelectedDeviceDetails();
 }
 
-function renderSelectedDeviceGallery() {
+function renderSelectedDeviceDetails() {
     const dev = allDevicesMap[selectedDeviceId];
     if (!dev) return;
 
     if (selectedDeviceName) selectedDeviceName.textContent = dev.device_name;
-    if (selectedDeviceSubmeta) selectedDeviceSubmeta.textContent = `IP: ${dev.client_ip} | Registered: ${dev.first_seen} | Ingested: ${dev.total_frames} Frames`;
+    if (selectedDeviceSubmeta) selectedDeviceSubmeta.textContent = `IP: ${dev.client_ip} | Registered: ${dev.first_seen} | Total Frames: ${dev.total_frames}`;
     if (selectedDeviceStatusBadge) {
         selectedDeviceStatusBadge.textContent = dev.status === 'active' ? 'STREAMING ACTIVE' : 'STANDBY / IDLE';
         selectedDeviceStatusBadge.className = dev.status === 'active' 
@@ -279,41 +308,80 @@ function renderSelectedDeviceGallery() {
         selectedDeviceIndicator.className = `w-3 h-3 rounded-full ${dev.status === 'active' ? 'bg-brand-emerald animate-ping' : 'bg-slate-500'}`;
     }
 
-    const frames = dev.raw_frames || [];
-    if (rawFramesCountLabel) rawFramesCountLabel.textContent = `${frames.length} Recent Frames`;
-
-    if (!rawFramesGallery) return;
-    rawFramesGallery.innerHTML = '';
-
-    if (frames.length === 0) {
-        rawFramesGallery.innerHTML = `
-            <div class="col-span-full text-center text-slate-500 py-16 font-mono text-xs">
-                📷 No raw uncropped frames captured yet from ${dev.device_name}.
-            </div>
-        `;
-        return;
+    // Render Panel A: Verified Students from this device (with Roll Number & Name)
+    if (devPanelStudents) {
+        devPanelStudents.innerHTML = '';
+        const students = dev.verified_students || [];
+        
+        if (students.length === 0) {
+            devPanelStudents.innerHTML = '<div class="text-center text-slate-500 py-16 font-mono text-xs">No students verified from this specific camera node yet.</div>';
+        } else {
+            students.forEach((st, idx) => {
+                const item = document.createElement('div');
+                item.className = 'bg-black/60 p-3 rounded-xl border border-brand-emerald/30 flex justify-between items-center animate-slideIn';
+                item.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-lg bg-brand-emerald/20 text-brand-emerald flex items-center justify-center text-xs font-bold font-mono border border-brand-emerald/40">
+                            #${String(idx + 1).padStart(2, '0')}
+                        </div>
+                        <div>
+                            <div class="font-bold text-white font-mono text-xs">${st.name}</div>
+                            <div class="text-[10px] text-brand-cyan font-mono font-bold">Roll Number: ${st.roll_number || 'N/A'}</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span class="text-[10px] text-brand-emerald font-mono bg-brand-emerald/10 px-2 py-1 rounded border border-brand-emerald/30">
+                            ${st.time} ✓
+                        </span>
+                        ${st.photo ? `<img src="${st.photo}" class="w-8 h-8 object-cover rounded-lg border border-white/20">` : ''}
+                    </div>
+                `;
+                devPanelStudents.appendChild(item);
+            });
+        }
     }
 
-    frames.forEach((frm, idx) => {
-        const item = document.createElement('div');
-        item.className = 'group relative aspect-video bg-black rounded-lg overflow-hidden border border-white/10 hover:border-brand-cyan transition-all cursor-pointer shadow-md';
+    // Render Panel B: Raw Frames
+    if (devPanelFrames) {
+        devPanelFrames.innerHTML = '';
+        const frames = dev.raw_frames || [];
         
-        item.onclick = () => {
-            openLightbox(frm.url, dev.device_name, frm.timestamp, frm.ip || dev.client_ip);
-        };
+        if (frames.length === 0) {
+            devPanelFrames.innerHTML = '<div class="col-span-full text-center text-slate-500 py-16 font-mono text-xs">No raw frames captured for this device yet.</div>';
+        } else {
+            frames.forEach((frm, idx) => {
+                const item = document.createElement('div');
+                item.className = 'group relative aspect-video bg-black rounded-lg overflow-hidden border border-white/10 hover:border-brand-cyan transition-all cursor-pointer shadow-md';
+                item.onclick = () => openLightbox(frm.url, dev.device_name, frm.timestamp, frm.ip || dev.client_ip);
+                item.innerHTML = `
+                    <img src="${frm.url}" alt="Raw Frame" class="w-full h-full object-cover group-hover:scale-105 transition-all duration-300">
+                    <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-2 flex flex-col justify-between">
+                        <span class="text-[9px] font-mono text-brand-cyan self-end bg-black/60 px-1.5 py-0.5 rounded">🔍 ZOOM</span>
+                        <div class="text-[10px] font-mono text-white">${frm.timestamp}</div>
+                    </div>
+                `;
+                devPanelFrames.appendChild(item);
+            });
+        }
+    }
+}
 
-        item.innerHTML = `
-            <img src="${frm.url}" alt="Raw Frame" class="w-full h-full object-cover group-hover:scale-105 transition-all duration-300">
-            <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-2 flex flex-col justify-between">
-                <span class="text-[9px] font-mono text-brand-cyan self-end bg-black/60 px-1.5 py-0.5 rounded">🔍 ZOOM</span>
-                <div class="text-[10px] font-mono text-white">${frm.timestamp}</div>
-            </div>
-            <div class="absolute bottom-1 left-1 bg-black/70 px-1.5 py-0.5 rounded text-[8px] font-mono text-slate-300">
-                #${frames.length - idx}
-            </div>
-        `;
-        rawFramesGallery.appendChild(item);
-    });
+// Dual tab buttons inside Device View
+if (devTabStudentsBtn && devTabFramesBtn) {
+    devTabStudentsBtn.onclick = () => {
+        currentDevTab = 'STUDENTS';
+        devTabStudentsBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-brand-emerald/20 text-brand-emerald border border-brand-emerald/40 transition-all flex items-center gap-1.5";
+        devTabFramesBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5";
+        devPanelStudents.classList.remove('hidden');
+        devPanelFrames.classList.add('hidden');
+    };
+    devTabFramesBtn.onclick = () => {
+        currentDevTab = 'FRAMES';
+        devTabFramesBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/40 transition-all flex items-center gap-1.5";
+        devTabStudentsBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5";
+        devPanelFrames.classList.remove('hidden');
+        devPanelStudents.classList.add('hidden');
+    };
 }
 
 // Filter button handlers
@@ -356,9 +424,7 @@ function openLightbox(imgUrl, deviceName, timestamp, ip) {
 }
 
 if (lightboxCloseBtn) {
-    lightboxCloseBtn.onclick = () => {
-        rawLightbox.classList.add('hidden');
-    };
+    lightboxCloseBtn.onclick = () => rawLightbox.classList.add('hidden');
 }
 
 if (rawLightbox) {
@@ -405,27 +471,23 @@ if (startScanBtn) {
         
         isRegistering = true;
         regProgress = 0;
-        targetX = overlayCanvas.width / 2;
-        targetY = overlayCanvas.height / 2;
-        currentDotX = targetX;
-        currentDotY = targetY;
 
         modalBackdrop.classList.add('hidden');
         regOverlay.classList.remove('hidden');
         if (regProgressBar) regProgressBar.style.width = '0%';
         
         regInstruction.textContent = "INITIALIZING 3D SCAN";
-        regSubtext.textContent = "Align face within target vector...";
+        regSubtext.textContent = "Align face with camera...";
         
-        trackedFaces = {};
-        overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-        
-        ws.send(JSON.stringify({ 
-            type: 'start_registration', 
-            name: name,
-            roll_number: roll
-        }));
-        logToTerminal(`Initiated biometric mapping for ${name} (Roll: ${roll})`, 'info');
+        // Start camera strictly for registration
+        startCamera().then(() => {
+            ws.send(JSON.stringify({ 
+                type: 'start_registration', 
+                name: name,
+                roll_number: roll
+            }));
+            logToTerminal(`Initiated biometric mapping for ${name} (Roll: ${roll})`, 'info');
+        });
     });
 }
 
@@ -446,6 +508,10 @@ function startCountdown(durationSeconds) {
     
     sessionStatusLabel.textContent = "MONITORING ACTIVE";
     sessionIndicator.className = "inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping";
+    if (statSessionStatus) {
+        statSessionStatus.textContent = "MONITORING ACTIVE";
+        statSessionStatus.className = "text-base font-bold font-mono text-brand-emerald";
+    }
     
     sessionTimerDisplay.textContent = formatTimerDisplay(sessionRemainingSeconds);
     
@@ -471,6 +537,10 @@ function resetSessionUI() {
     
     sessionStatusLabel.textContent = "STANDBY / CONCLUDED";
     sessionIndicator.className = "inline-block w-2 h-2 rounded-full bg-slate-500";
+    if (statSessionStatus) {
+        statSessionStatus.textContent = "STANDBY";
+        statSessionStatus.className = "text-base font-bold font-mono text-slate-400";
+    }
 }
 
 if (startSessionBtn) {
@@ -481,7 +551,7 @@ if (startSessionBtn) {
                 type: 'start_session',
                 duration_minutes: duration
             }));
-            logToTerminal(`[SESSION] Triggered start command (${duration} mins)...`, 'info');
+            logToTerminal(`[SESSION] Triggered start command (${duration} mins) to Raspberry Pis...`, 'info');
         } else {
             showToast("Server connection offline", "error");
         }
@@ -490,7 +560,7 @@ if (startSessionBtn) {
 
 if (stopSessionBtn) {
     stopSessionBtn.addEventListener('click', () => {
-        if (!confirm("Are you sure you want to STOP monitoring? This will immediately compile the Excel sheet and email it to the teacher.")) return;
+        if (!confirm("Are you sure you want to STOP monitoring? This will immediately compile the Excel sheet and email it to shashankdubey822@gmail.com.")) return;
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'stop_session' }));
             logToTerminal(`[SESSION] Manual stop triggered. Dispatching report...`, 'warning');
@@ -498,79 +568,35 @@ if (stopSessionBtn) {
     });
 }
 
-// --- AUDIO ENGINE ---
-let audioCtx;
-function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
-function playTone(freq, type, duration, vol=0.1) {
-    if (!audioCtx) return;
-    try {
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = type;
-        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-        gain.gain.setValueAtTime(vol, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + duration);
-    } catch(e){}
-}
-
-function speakWarning(text) {
-    if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        const msg = new SpeechSynthesisUtterance(text);
-        msg.rate = 0.9;
-        msg.pitch = 0.5;
-        msg.volume = 1.0;
-        window.speechSynthesis.speak(msg);
-    }
-}
-
-// --- TARGET TRACKING CANVAS DRAWER ---
-function updateTargetFaces(faces) {
-    const now = Date.now();
-    faces.forEach(f => {
-        if (!trackedFaces[f.id]) {
-            trackedFaces[f.id] = {
-                id: f.id,
-                name: f.name,
-                roll_number: f.roll_number || 'N/A',
-                status: f.status,
-                score: f.score,
-                currBox: { ...f.box },
-                targetBox: { ...f.box },
-                lastSeen: now
-            };
-        } else {
-            trackedFaces[f.id].name = f.name;
-            trackedFaces[f.id].roll_number = f.roll_number || 'N/A';
-            trackedFaces[f.id].status = f.status;
-            trackedFaces[f.id].score = f.score;
-            trackedFaces[f.id].targetBox = { ...f.box };
-            trackedFaces[f.id].lastSeen = now;
+// --- CLEAR RAW FRAME CACHE ---
+if (clearCacheBtn) {
+    clearCacheBtn.addEventListener('click', async () => {
+        try {
+            const res = await fetch('/api/clear_frames', { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+                showToast("Frame cache cleared", "success");
+                logToTerminal("Purged stored raw frames cache from server.", "success");
+                for (const d in allDevicesMap) {
+                    allDevicesMap[d].raw_frames = [];
+                    allDevicesMap[d].total_frames = 0;
+                }
+                updateDevicesData(Object.values(allDevicesMap));
+            }
+        } catch (e) {
+            showToast("Failed to clear cache", "error");
         }
     });
-
-    for (const id in trackedFaces) {
-        if (now - trackedFaces[id].lastSeen > BOX_FADEOUT_MS) {
-            delete trackedFaces[id];
-        }
-    }
 }
 
+// --- DRAWING CORNERS ON CANVAS ---
 function drawHighTechCorners(x, y, w, h, color, size = 15) {
     overlayCtx.strokeStyle = color;
     overlayCtx.lineWidth = 2.5;
     overlayCtx.beginPath();
-    // Top-Left
     overlayCtx.moveTo(x, y + size); overlayCtx.lineTo(x, y); overlayCtx.lineTo(x + size, y);
-    // Top-Right
     overlayCtx.moveTo(x + w - size, y); overlayCtx.lineTo(x + w, y); overlayCtx.lineTo(x + w, y + size);
-    // Bottom-Left
     overlayCtx.moveTo(x, y + h - size); overlayCtx.lineTo(x, y); overlayCtx.lineTo(x + size, y + h);
-    // Bottom-Right
     overlayCtx.moveTo(x + w - size, y + h); overlayCtx.lineTo(x + w, y + h); overlayCtx.lineTo(x + w, y + h - size);
     overlayCtx.stroke();
 }
@@ -589,52 +615,18 @@ function drawSmoothFaces() {
 
         const { x, y, w, h } = obj.currBox;
         
-        let color = '#00d2ff';
+        let color = obj.status === 'match' ? '#10b981' : (obj.status === 'spoof' ? '#ef4444' : '#00d2ff');
         let label = obj.name;
-        if (obj.status === 'match') {
-            color = '#10b981';
-        } else if (obj.status === 'spoof' || obj.name.includes('SPOOF')) {
-            color = '#ef4444';
-        } else if (obj.status === 'failed') {
-            color = '#f59e0b';
-        }
 
         drawHighTechCorners(x, y, w, h, color);
 
         overlayCtx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-        overlayCtx.fillRect(x, Math.max(0, y - 28), Math.max(120, w), 24);
+        overlayCtx.fillRect(x, Math.max(0, y - 28), Math.max(140, w), 24);
         
         overlayCtx.fillStyle = color;
         overlayCtx.font = 'bold 12px Orbitron, monospace';
         overlayCtx.fillText(label, x + 6, Math.max(16, y - 12));
     }
-}
-
-function drawGamifiedScanner() {
-    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-    const cx = overlayCanvas.width / 2;
-    const cy = overlayCanvas.height / 2;
-    const r = Math.min(cx, cy) * 0.6;
-
-    regPulseAngle += 0.05;
-    
-    overlayCtx.strokeStyle = 'rgba(0, 210, 255, 0.4)';
-    overlayCtx.lineWidth = 2;
-    overlayCtx.beginPath();
-    overlayCtx.arc(cx, cy, r, 0, Math.PI * 2);
-    overlayCtx.stroke();
-
-    overlayCtx.strokeStyle = '#00d2ff';
-    overlayCtx.lineWidth = 4;
-    overlayCtx.beginPath();
-    overlayCtx.arc(cx, cy, r, -Math.PI / 2, (-Math.PI / 2) + ((regProgress / 100) * Math.PI * 2));
-    overlayCtx.stroke();
-
-    overlayCtx.strokeStyle = 'rgba(16, 185, 129, 0.7)';
-    overlayCtx.beginPath();
-    overlayCtx.moveTo(cx - 20, cy); overlayCtx.lineTo(cx + 20, cy);
-    overlayCtx.moveTo(cx, cy - 20); overlayCtx.lineTo(cx, cy + 20);
-    overlayCtx.stroke();
 }
 
 function updateDebugCrops(faces) {
@@ -643,7 +635,7 @@ function updateDebugCrops(faces) {
     if (cropCount) cropCount.textContent = faces.length;
 
     if (faces.length === 0) {
-        debugCrops.innerHTML = '<div class="text-xs text-slate-600 italic font-mono">Awaiting target...</div>';
+        debugCrops.innerHTML = '<div class="text-xs text-slate-600 italic font-mono">Awaiting face...</div>';
         return;
     }
 
@@ -654,19 +646,13 @@ function updateDebugCrops(faces) {
             const img = document.createElement('img');
             img.src = face.crop;
             img.className = 'w-full h-full object-cover';
-            
-            const badge = document.createElement('div');
-            badge.className = 'absolute bottom-0 left-0 right-0 bg-black/80 text-[7px] text-center py-0.5 truncate text-white font-mono';
-            badge.textContent = face.status === 'match' ? 'VERIFIED' : (face.status === 'spoof' ? 'SPOOF' : 'SCAN');
-            
             container.appendChild(img);
-            container.appendChild(badge);
             debugCrops.appendChild(container);
         }
     });
 }
 
-// --- WEBSOCKET ENGINE ---
+// --- WEBSOCKET CONNECTION ---
 function connectWebSocket() {
     ws = new WebSocket(wsUrl);
     
@@ -677,8 +663,8 @@ function connectWebSocket() {
             statusElem.textContent = 'SYSTEM ONLINE';
             statusElem.className = 'text-xs font-mono text-emerald-400 tracking-wide';
         }
-        logToTerminal("WebSocket Connected. Telemetry Hub Active.", "success");
-        showToast("Connected to AI Subsystem", "success");
+        logToTerminal("WebSocket Connected. Central Hub Active.", "success");
+        showToast("Connected to Central Subsystem", "success");
         
         ws.send(JSON.stringify({ type: 'get_session_status' }));
         ws.send(JSON.stringify({ type: 'get_devices' }));
@@ -711,7 +697,7 @@ function connectWebSocket() {
             if (allDevicesMap[devId]) {
                 if (!allDevicesMap[devId].raw_frames) allDevicesMap[devId].raw_frames = [];
                 allDevicesMap[devId].raw_frames.unshift(data.frame);
-                if (allDevicesMap[devId].raw_frames.length > 30) allDevicesMap[devId].raw_frames.pop();
+                if (allDevicesMap[devId].raw_frames.length > 20) allDevicesMap[devId].raw_frames.pop();
                 allDevicesMap[devId].total_frames = (allDevicesMap[devId].total_frames || 0) + 1;
                 allDevicesMap[devId].last_seen = data.frame.timestamp;
                 allDevicesMap[devId].status = 'active';
@@ -724,32 +710,27 @@ function connectWebSocket() {
         if (data.type === 'session_started') {
             startCountdown(data.duration_minutes * 60);
             
-            // Clean slate for new session
             confirmedPeople.clear();
-            if (confirmedList) confirmedList.innerHTML = '<div class="text-center text-slate-500/50 mt-10 text-sm font-mono tracking-widest">AWAITING VERIFICATION</div>';
+            if (confirmedList) confirmedList.innerHTML = '<div class="text-center text-slate-500/50 mt-20 text-sm font-mono tracking-widest">AWAITING ATTENDANCE (SCANNING VIA RASPBERRY PI)...</div>';
             if (sessionPresentCount) sessionPresentCount.textContent = '0';
-            for (const k in currentlyVisible) delete currentlyVisible[k];
-            renderPresenceList();
+            if (ledgerSessionIdLabel) ledgerSessionIdLabel.textContent = `Session: ${data.session_id}`;
 
             showToast(`Session started (${data.duration_minutes}m) — Clean Slate`, "success");
             logToTerminal(`[SESSION] ▶️ Fresh Session Active: ${data.session_id} (${data.duration_minutes} mins)`, "success");
-            initAudio();
-            playTone(880, 'sine', 0.2);
             return;
         }
 
         if (data.type === 'session_stopped') {
             resetSessionUI();
             showToast(`Session ended! Report emailed to shashankdubey822@gmail.com (${data.total_attendees} students)`, "success");
-            logToTerminal(`[SESSION] 🏁 Concluded. Present: ${data.total_attendees}. Report emailed.`, "success");
-            initAudio();
-            playTone(1200, 'triangle', 0.5);
+            logToTerminal(`[SESSION] 🏁 Concluded. Attendees: ${data.total_attendees}. Report emailed to shashankdubey822@gmail.com.`, "success");
             return;
         }
 
         if (data.type === 'session_status') {
             if (data.active && data.remaining_seconds > 0) {
                 startCountdown(data.remaining_seconds);
+                if (ledgerSessionIdLabel) ledgerSessionIdLabel.textContent = `Session: ${data.session_id}`;
                 logToTerminal(`[SESSION] Resumed active monitoring session (${Math.ceil(data.remaining_seconds/60)} mins remaining)`, "info");
             } else {
                 resetSessionUI();
@@ -757,31 +738,9 @@ function connectWebSocket() {
             return;
         }
 
-        // --- INTRUDER ALERT ---
-        if (data.type === 'intruder_alert') {
-            const overlay = document.getElementById('intruder-alert');
-            if (overlay) overlay.classList.remove('hidden');
-            const img = document.getElementById('intruder-img');
-            if (img) img.src = data.image;
-            
-            initAudio();
-            playTone(300, 'square', 1.0, 0.5);
-            speakWarning("Security Alert. Unidentified entity detected.");
-            logToTerminal(`[WARNING] Intruder Snapshot Captured!`, "error");
-            
-            setTimeout(() => {
-                if (overlay) overlay.classList.add('hidden');
-            }, 5000);
-            return;
-        }
-
         // --- REGISTRATION MESSAGES ---
         if (data.type === 'registration_status') {
             isProcessing = false;
-            if (data.progress > regProgress) {
-                initAudio();
-                playTone(1000, 'sine', 0.1);
-            }
             regProgress = data.progress;
             if (regProgressBar) regProgressBar.style.width = `${regProgress}%`;
             regSubtext.textContent = `${data.message}`;
@@ -794,29 +753,32 @@ function connectWebSocket() {
             return;
         } 
         
-        if (data.type === 'registration_waiting') {
-            isProcessing = false;
-            regSubtext.textContent = data.message;
-            return;
-        } 
-        
         if (data.type === 'registration_success') {
-            playTone(1200, 'triangle', 0.4, 0.2);
             isProcessing = false;
             isRegistering = false;
             regOverlay.classList.add('hidden');
             logToTerminal(data.message, "success");
             showToast("Student Registered Successfully", "success");
+            // Stop registration camera
+            if (currentStream && !isDemoRunning) {
+                currentStream.getTracks().forEach(t => t.stop());
+                currentStream = null;
+                video.srcObject = null;
+            }
             return;
         } 
         
         if (data.type === 'registration_error') {
-            playTone(200, 'sawtooth', 0.5, 0.2);
             isProcessing = false;
             isRegistering = false;
             regOverlay.classList.add('hidden');
             logToTerminal(data.message, "error");
             showToast(data.message, "error");
+            if (currentStream && !isDemoRunning) {
+                currentStream.getTracks().forEach(t => t.stop());
+                currentStream = null;
+                video.srcObject = null;
+            }
             return;
         }
 
@@ -824,36 +786,45 @@ function connectWebSocket() {
         if (data.type === 'attendance') {
             const displayName = data.name;
             const rollNumber = data.roll_number || 'N/A';
-            const uniqueKey = `${rollNumber}_${displayName}`;
+            const devId = data.device_id || 'Raspberry Pi';
 
-            currentlyVisible[uniqueKey] = { name: displayName, roll: rollNumber, ts: Date.now() };
+            addConfirmedEntry(displayName, rollNumber, data.time, devId);
+            showToast(`Verified: ${displayName} (${rollNumber})`, "success");
+            logToTerminal(`Clearance Granted: ${displayName} [Roll: ${rollNumber}] via ${devId}`, "success");
             
-            renderPresenceList();
-            addConfirmedEntry(displayName, rollNumber, data.time);
-            showToast(`Clearance Granted: ${displayName} (${rollNumber})`, "success");
-            playTone(1500, 'sine', 0.1);
-            logToTerminal(`Clearance Granted: ${displayName} [Roll: ${rollNumber}]`, "success");
+            // Also update the device's verified list
+            if (allDevicesMap[devId]) {
+                if (!allDevicesMap[devId].verified_students) allDevicesMap[devId].verified_students = [];
+                allDevicesMap[devId].verified_students.unshift({
+                    name: displayName,
+                    roll_number: rollNumber,
+                    time: data.time
+                });
+                renderDevicesView();
+            }
             return;
         }
 
-        // --- READY / FRAME RESULTS ---
+        // --- FRAME RESULTS (IN DEMO MODE) ---
         if (data.type === 'ready') {
             isProcessing = false;
             if (data.faces && data.faces.length > 0) {
-                updateTargetFaces(data.faces);
-                if (!isRegistering) updateDebugCrops(data.faces);
-                
-                data.faces.forEach(face => {
-                    if (face.status === 'match') {
-                        const roll = face.roll_number || 'N/A';
-                        const key = `${roll}_${face.raw_name || face.name}`;
-                        currentlyVisible[key] = { name: face.raw_name || face.name, roll: roll, ts: Date.now() };
-                    }
+                const now = Date.now();
+                data.faces.forEach(f => {
+                    trackedFaces[f.id] = {
+                        id: f.id,
+                        name: f.name,
+                        roll_number: f.roll_number || 'N/A',
+                        status: f.status,
+                        currBox: { ...f.box },
+                        targetBox: { ...f.box },
+                        lastSeen: now
+                    };
                 });
-                renderPresenceList();
+                if (isDemoRunning) updateDebugCrops(data.faces);
             } else {
                 trackedFaces = {};
-                updateDebugCrops([]);
+                if (isDemoRunning) updateDebugCrops([]);
             }
         }
     };
@@ -866,15 +837,13 @@ function connectWebSocket() {
             statusElem.textContent = 'RECONNECTING...';
             statusElem.className = 'text-xs font-mono text-red-500 tracking-wide animate-pulse';
         }
-        showToast("Lost connection to Security Subsystem", "error");
-        
         const timeout = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
         setTimeout(connectWebSocket, timeout);
         reconnectAttempts++;
     };
 }
 
-function addConfirmedEntry(name, rollNumber, time) {
+function addConfirmedEntry(name, rollNumber, time, deviceName) {
     const key = `${rollNumber}_${name}`;
     if (confirmedPeople.has(key)) return;
     if (confirmedPeople.size === 0) confirmedList.innerHTML = '';
@@ -883,101 +852,26 @@ function addConfirmedEntry(name, rollNumber, time) {
     if (sessionPresentCount) sessionPresentCount.textContent = confirmedPeople.size;
     
     const div = document.createElement('div');
-    div.className = 'bg-brand-emerald/10 p-3 rounded-xl border border-brand-emerald/30 flex justify-between items-center animate-slideIn shadow-[0_0_15px_rgba(16,185,129,0.1)]';
+    div.className = 'bg-brand-emerald/10 p-4 rounded-xl border border-brand-emerald/30 flex justify-between items-center animate-slideIn shadow-[0_0_15px_rgba(16,185,129,0.1)]';
     div.innerHTML = `
         <div class="flex items-center gap-3">
-            <div class="w-8 h-8 rounded-lg bg-brand-emerald/20 text-brand-emerald flex items-center justify-center text-xs font-bold font-mono border border-brand-emerald/50">#${String(confirmedPeople.size).padStart(2, '0')}</div>
+            <div class="w-9 h-9 rounded-lg bg-brand-emerald/20 text-brand-emerald flex items-center justify-center text-xs font-bold font-mono border border-brand-emerald/50">
+                #${String(confirmedPeople.size).padStart(2, '0')}
+            </div>
             <div>
-                <div class="font-bold text-white tracking-wide font-mono text-xs">${name}</div>
-                <div class="text-[9px] text-brand-cyan font-mono uppercase tracking-wider">Roll: ${rollNumber}</div>
+                <div class="font-bold text-white tracking-wide font-mono text-sm">${name}</div>
+                <div class="text-xs text-brand-cyan font-mono font-bold mt-0.5">Roll Number: ${rollNumber}</div>
             </div>
         </div>
-        <span class="text-[10px] text-brand-emerald font-mono bg-brand-emerald/10 px-2 py-1 rounded border border-brand-emerald/20">${time}</span>
+        <div class="text-right">
+            <span class="text-xs text-brand-emerald font-mono bg-brand-emerald/10 px-2.5 py-1 rounded border border-brand-emerald/20">${time} ✓</span>
+            <div class="text-[10px] text-slate-500 font-mono mt-1">Node: ${deviceName}</div>
+        </div>
     `;
     confirmedList.insertBefore(div, confirmedList.firstChild);
 }
 
-setInterval(() => {
-    const now = Date.now();
-    let hasChanges = false;
-    for (const key in currentlyVisible) {
-        if (now - currentlyVisible[key].ts > VISIBILITY_TIMEOUT_MS) {
-            delete currentlyVisible[key];
-            hasChanges = true;
-        }
-    }
-    if (hasChanges) renderPresenceList();
-}, 1000);
-
-function renderPresenceList() {
-    const keys = Object.keys(currentlyVisible);
-    if (keys.length === 0 || Object.keys(trackedFaces).length === 0) {
-        attendanceList.innerHTML = '<div class="text-center text-slate-500/50 mt-10 text-sm font-mono tracking-widest animate-pulse">NO ENTITIES DETECTED</div>';
-        return;
-    }
-    attendanceList.innerHTML = ''; 
-    
-    keys.forEach(key => {
-        const item = currentlyVisible[key];
-        const div = document.createElement('div');
-        div.className = 'bg-black/60 p-3 rounded-xl border border-brand-cyan/50 flex justify-between items-center animate-slideIn shadow-[0_0_15px_rgba(0,210,255,0.2)] backdrop-blur-sm';
-        div.innerHTML = `
-            <div class="flex items-center gap-3">
-                <div class="relative flex h-3 w-3 ml-1">
-                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-cyan opacity-75"></span>
-                  <span class="relative inline-flex rounded-full h-3 w-3 bg-brand-cyan"></span>
-                </div>
-                <div>
-                    <div class="font-bold text-white tracking-wide font-mono text-xs">${item.name}</div>
-                    <div class="text-[9px] text-brand-cyan font-mono uppercase tracking-wider">Roll: ${item.roll}</div>
-                </div>
-            </div>
-            <span class="text-[9px] text-brand-cyan uppercase font-mono px-2 py-0.5 rounded bg-brand-cyan/10 border border-brand-cyan/30">Active</span>
-        `;
-        attendanceList.appendChild(div);
-    });
-}
-
-async function populateCameraDevices() {
-    try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        availableCameras = devices.filter(d => d.kind === 'videoinput');
-        
-        if (cameraSelect) {
-            cameraSelect.innerHTML = '';
-            if (availableCameras.length === 0) {
-                cameraSelect.innerHTML = '<option value="">NO CAMERAS FOUND</option>';
-                return;
-            }
-
-            availableCameras.forEach((cam, idx) => {
-                const option = document.createElement('option');
-                option.value = cam.deviceId;
-                let label = cam.label || `Camera ${idx + 1}`;
-                if (label.toLowerCase().includes('front') || label.toLowerCase().includes('user')) {
-                    label = `🤳 Front Camera (${label.slice(0, 15)})`;
-                } else if (label.toLowerCase().includes('back') || label.toLowerCase().includes('environment')) {
-                    label = `📷 Back Camera (${label.slice(0, 15)})`;
-                }
-                option.textContent = label;
-                cameraSelect.appendChild(option);
-            });
-        }
-    } catch (err) {
-        console.warn("Could not enumerate camera devices:", err);
-    }
-}
-
-if (cameraSelect) {
-    cameraSelect.addEventListener('change', (e) => {
-        const deviceId = e.target.value;
-        if (deviceId) {
-            logToTerminal(`Switching camera input...`, 'info');
-            startCamera(deviceId);
-        }
-    });
-}
-
+// --- LOCAL CAMERA INITIALIZER (FOR DEMO & REGISTRATION ONLY) ---
 async function startCamera(selectedDeviceId = null) {
     try {
         if (currentStream) {
@@ -995,43 +889,50 @@ async function startCamera(selectedDeviceId = null) {
         currentStream = stream;
         video.srcObject = stream;
 
-        const track = stream.getVideoTracks()[0];
-        const settings = track.getSettings ? track.getSettings() : {};
-        const label = (track.label || "").toLowerCase();
-        
-        if (settings.facingMode === 'user' || label.includes('front') || label.includes('user')) {
-            isFrontCamera = true;
-            video.classList.add('mirror-video');
-        } else {
-            isFrontCamera = false;
-            video.classList.remove('mirror-video');
-        }
-
         video.onloadedmetadata = () => {
             canvas.width = video.videoWidth; 
             canvas.height = video.videoHeight;
             overlayCanvas.width = video.videoWidth; 
             overlayCanvas.height = video.videoHeight;
             
-            populateCameraDevices().then(() => {
-                if (selectedDeviceId && cameraSelect) {
-                    cameraSelect.value = selectedDeviceId;
-                }
-            });
-
+            populateCameraDevices();
             requestAnimationFrame(renderLoop);
         };
     } catch (err) {
-        showToast("Local camera access failed or unavailable", "error");
+        showToast("Camera access failed or unavailable", "error");
     }
 }
 
-// --- CORE RENDER LOOP ---
+async function populateCameraDevices() {
+    try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        availableCameras = devices.filter(d => d.kind === 'videoinput');
+        
+        if (cameraSelect) {
+            cameraSelect.innerHTML = '';
+            availableCameras.forEach((cam, idx) => {
+                const option = document.createElement('option');
+                option.value = cam.deviceId;
+                option.textContent = cam.label || `Camera ${idx + 1}`;
+                cameraSelect.appendChild(option);
+            });
+        }
+    } catch (err) {}
+}
+
+if (cameraSelect) {
+    cameraSelect.addEventListener('change', (e) => {
+        if (e.target.value) startCamera(e.target.value);
+    });
+}
+
+// --- DEMO & SCAN RENDER LOOP ---
 function renderLoop() {
+    if (!isDemoRunning && !isRegistering) return; // Exit immediately if neither demo nor registration is active
+
     frameCount++;
     if (Date.now() - lastFpsTime >= 1000) {
-        const fpsElem = document.getElementById('fps-counter');
-        if (fpsElem) fpsElem.textContent = frameCount;
+        if (fpsCounter) fpsCounter.textContent = frameCount;
         frameCount = 0;
         lastFpsTime = Date.now();
     }
@@ -1042,19 +943,19 @@ function renderLoop() {
         if (isRegistering) {
             isProcessing = true;
             ws.send(JSON.stringify({ type: 'register_frame', image: canvas.toDataURL('image/jpeg', 0.8) }));
-        } else {
+        } else if (isDemoRunning) {
             isProcessing = true;
             ws.send(JSON.stringify({ 
                 type: 'frame', 
-                device_id: 'web_browser_client',
-                device_name: 'Web Browser Host',
+                device_id: 'web_demo_client',
+                device_name: 'Web Browser Demo',
+                is_demo: true,
                 image: canvas.toDataURL('image/jpeg', 0.7) 
             }));
         }
     }
 
-    if (isRegistering) drawGamifiedScanner();
-    else drawSmoothFaces();
+    if (isDemoRunning) drawSmoothFaces();
 
     requestAnimationFrame(renderLoop);
 }
@@ -1074,14 +975,10 @@ if (deleteAllBtn) {
                 showToast("Database Wiped Clean", "success");
                 confirmedPeople.clear();
                 if (sessionPresentCount) sessionPresentCount.textContent = '0';
-                confirmedList.innerHTML = '<div class="text-center text-slate-500/50 mt-10 text-sm font-mono tracking-widest">AWAITING VERIFICATION</div>';
-            } else {
-                logToTerminal(data.message, 'error');
-                showToast(data.message, "error");
+                confirmedList.innerHTML = '<div class="text-center text-slate-500/50 mt-20 text-sm font-mono tracking-widest">AWAITING ATTENDANCE (SCANNING VIA RASPBERRY PI)...</div>';
             }
         } catch (err) {
             logToTerminal(err.message, 'error');
-            showToast("Network Error", "error");
         }
     });
 }
@@ -1089,22 +986,15 @@ if (deleteAllBtn) {
 const downloadBtn = document.getElementById('download-btn');
 if (downloadBtn) {
     downloadBtn.addEventListener('click', () => {
-        showToast("Generating Master Security Log...", "info");
-        logToTerminal("Exporting master security logs...", "info");
-        
+        showToast("Exporting Master Attendance Log...", "info");
         const a = document.createElement('a');
         a.href = '/logs';
         a.download = '';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        
-        setTimeout(() => {
-            showToast("Master Log Download Complete", "success");
-            logToTerminal("Master security logs exported successfully.", "success");
-        }, 1500);
     });
 }
 
+// Connect WebSocket only (DO NOT START CAMERA ON LOAD)
 connectWebSocket();
-startCamera();

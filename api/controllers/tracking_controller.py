@@ -119,14 +119,16 @@ class TrackingController:
                             asyncio.create_task(asyncio.to_thread(register_face_to_aws, matched_bytes, raw_id))
                             print(f"[FEDERATED LEARNING] Updated AWS neural profile for {display_name} (Score: {res['score']})")
 
-                        # Mark Attendance with photo
-                        status, s_name, s_roll, s_time = mark_attendance(raw_id, matched_bytes)
+                        # Mark Attendance with photo and device_id mapping
+                        dev_id = payload.get("device_id", "edge_device")
+                        status, s_name, s_roll, s_time = mark_attendance(raw_id, matched_bytes, device_id=dev_id)
                         if status in ("success", "already_marked"):
                             await self.websocket.send_json({
                                 "type": "attendance", 
                                 "name": display_name, 
                                 "roll_number": roll_no,
-                                "time": s_time or "Now"
+                                "time": s_time or "Now",
+                                "device_id": dev_id
                             })
                     else:
                         self.tracker.objects[obj_id]["aws_status"] = "failed"

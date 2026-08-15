@@ -123,8 +123,7 @@ async def websocket_endpoint(websocket: WebSocket):
     else:
         client_ip = "Unknown IP"
 
-    # Default device identity for this connection
-    assigned_device_id = "web_browser_client"
+    assigned_device_id = "web_demo_client"
     
     registration_controller = RegistrationController(websocket)
     tracking_controller = TrackingController(websocket)
@@ -176,10 +175,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     active_session["end_time"] = None
                     active_session["attendees"] = []
                     
-                    # Mark connected devices as active
+                    # Reset per-device verified students for this fresh session
                     for dev_id in connected_devices:
                         if connected_devices[dev_id]["status"] != "disconnected":
                             connected_devices[dev_id]["status"] = "active"
+                        connected_devices[dev_id]["verified_students"] = []
                     
                     # Cancel any existing timer
                     if session_timer_task and not session_timer_task.done():
@@ -245,7 +245,8 @@ async def websocket_endpoint(websocket: WebSocket):
                             "first_seen": now_str,
                             "last_seen": now_str,
                             "total_frames": 0,
-                            "raw_frames": []
+                            "raw_frames": [],
+                            "verified_students": []
                         }
                     else:
                         connected_devices[dev_id]["device_name"] = device_name
@@ -267,7 +268,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     })
                     continue
 
-                # --- 3. Live Tracking Frame (With Raw Frame Capture) ---
+                # --- 3. Live Tracking Frame (With Controlled Raw Frame Storage) ---
                 if p_type == "frame":
                     dev_id = payload.get("device_id") or assigned_device_id
                     dev_name = payload.get("device_name") or (connected_devices.get(dev_id, {}).get("device_name", "Edge Camera"))
@@ -283,7 +284,8 @@ async def websocket_endpoint(websocket: WebSocket):
                             "first_seen": now_str,
                             "last_seen": now_str,
                             "total_frames": 0,
-                            "raw_frames": []
+                            "raw_frames": [],
+                            "verified_students": []
                         }
                     else:
                         connected_devices[dev_id]["last_seen"] = now_str
@@ -291,34 +293,33 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     connected_devices[dev_id]["total_frames"] += 1
                     
-                    # Save raw uncropped frame
-                    try:
-                        encoded_data = payload["image"].split(',')[1]
-                        raw_bytes = base64.b64decode(encoded_data)
-                        raw_url = save_raw_frame(dev_id, raw_bytes)
-                        
-                        if raw_url:
-                            frame_entry = {
-                                "timestamp": datetime.now().strftime("%H:%M:%S"),
-                                "date": datetime.now().strftime("%Y-%m-%d"),
-                                "url": raw_url,
-                                "device_id": dev_id,
-                                "device_name": dev_name,
-                                "ip": client_ip
-                            }
-                            connected_devices[dev_id]["raw_frames"].insert(0, frame_entry)
-                            # Keep latest 30 frames in rolling memory per device
-                            if len(connected_devices[dev_id]["raw_frames"]) > 30:
-                                connected_devices[dev_id]["raw_frames"].pop()
-                                
-                            # Broadcast new raw frame event to dashboard
-                            await broadcast_json({
-                                "type": "new_raw_frame",
-                                "device_id": dev_id,
-                                "frame": frame_entry
-                            })
-                    except Exception as fe:
-                        print(f"⚠️ Raw frame extraction error: {fe}")
+                    # Save raw uncropped frame selectively (only for edge devices or during active session)
+                    if dev_id.startswith("rpi_") or active_session.get("active"):
+                        try:
+                            encoded_data = payload["image"].split(',')[1]
+                            raw_bytes = base64.b64decode(encoded_data)
+                            raw_url = save_raw_frame(dev_id, raw_bytes)
+                            
+                            if raw_url:
+                                frame_entry = {
+                                    "timestamp": datetime.now().strftime("%H:%M:%S"),
+                                    "date": datetime.now().strftime("%Y-%m-%d"),
+                                    "url": raw_url,
+                                    "device_id": dev_id,
+                                    "device_name": dev_name,
+                                    "ip": client_ip
+                                }
+                                connected_devices[dev_id]["raw_frames"].insert(0, frame_entry)
+                                if len(connected_devices[dev_id]["raw_frames"]) > 20:
+                                    connected_devices[dev_id]["raw_frames"].pop()
+                                    
+                                await broadcast_json({
+                                    "type": "new_raw_frame",
+                                    "device_id": dev_id,
+                                    "frame": frame_entry
+                                })
+                        except Exception as fe:
+                            print(f"⚠️ Raw frame extraction error: {fe}")
 
                     # Continue standard tracking & face detection pipeline
                     await tracking_controller.process_frame(payload)

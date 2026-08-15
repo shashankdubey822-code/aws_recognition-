@@ -1,4 +1,5 @@
 import os
+import shutil
 import asyncio
 import pandas as pd
 import datetime
@@ -17,7 +18,7 @@ from core.config import (
 )
 from core.state import (
     attendance_memory, PRESENT_IDENTITIES, last_seen, 
-    temporal_memory, active_session
+    temporal_memory, active_session, connected_devices
 )
 from api.websocket import websocket_endpoint, end_active_session
 from services.aws_client import ensure_collection_exists, delete_all_faces
@@ -31,6 +32,7 @@ async def lifespan(app: FastAPI):
     os.makedirs(REPORTS_DIR, exist_ok=True)
     os.makedirs("static/intruders", exist_ok=True)
     os.makedirs("static/attendees", exist_ok=True)
+    os.makedirs("static/raw_frames", exist_ok=True)
     
     # 1. Initialize AWS Rekognition Collection
     try:
@@ -51,7 +53,7 @@ async def lifespan(app: FastAPI):
             print(f"✅ Loaded {len(attendance_memory)} records into memory.")
         else:
             with open(LOG_FILE, "w", encoding="utf-8") as f: 
-                f.write("Roll Number,Name,Time,Date,Status\n")
+                f.write("Roll Number,Name,Time,Date,Status,Device\n")
             print(f"✅ Created new attendance log: {LOG_FILE}")
     except Exception as e:
         print(f"⚠️ WARNING: Could not load attendance logs: {e}")
@@ -66,7 +68,7 @@ async def lifespan(app: FastAPI):
             pass
 
 # --- FastAPI Application ---
-app = FastAPI(title="Nexus AI — Enterprise Attendance & Surveillance", version="3.1.0", lifespan=lifespan)
+app = FastAPI(title="Nexus AI — Enterprise Attendance & Surveillance Hub", version="3.2.0", lifespan=lifespan)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
@@ -109,7 +111,6 @@ async def api_login(data: LoginRequest):
             "token": AUTH_TOKEN_VALUE, 
             "redirect": f"/?token={AUTH_TOKEN_VALUE}"
         })
-        # Use SameSite=None and Secure=True for iframe compatibility
         response.set_cookie(
             key=SESSION_COOKIE_NAME,
             value=AUTH_TOKEN_VALUE,
@@ -164,7 +165,6 @@ async def read_root(request: Request):
     """Serves the main teacher monitoring dashboard."""
     token = request.query_params.get("token")
     
-    # If authenticated or query token present, render dashboard and set cookie
     response = templates.TemplateResponse("index.html", {
         "request": request,
         "teacher_email": TEACHER_EMAIL,
@@ -218,6 +218,22 @@ async def download_report_file(filename: str, request: Request):
     media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if filename.endswith(".xlsx") else "text/csv"
     return FileResponse(filepath, media_type=media_type, filename=filename)
 
+@app.post("/api/clear_frames")
+async def clear_raw_frames(request: Request):
+    """Purge all stored raw uncropped frames and reset device frame buffers."""
+    try:
+        if os.path.exists("static/raw_frames"):
+            shutil.rmtree("static/raw_frames")
+            os.makedirs("static/raw_frames", exist_ok=True)
+        
+        for dev_id in connected_devices:
+            connected_devices[dev_id]["raw_frames"] = []
+            connected_devices[dev_id]["total_frames"] = 0
+            
+        return {"success": True, "message": "Raw frame cache cleared successfully."}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
 @app.post("/delete_faces")
 async def wipe_faces(request: Request):
     """Trigger Full System Reset: AWS + Local Memory + Local Logs."""
@@ -228,9 +244,13 @@ async def wipe_faces(request: Request):
         last_seen.clear()
         temporal_memory.clear()
         active_session["attendees"] = []
+        for dev_id in connected_devices:
+            connected_devices[dev_id]["verified_students"] = []
+            connected_devices[dev_id]["raw_frames"] = []
+            connected_devices[dev_id]["total_frames"] = 0
         try:
             with open(LOG_FILE, "w", encoding="utf-8") as f: 
-                f.write("Roll Number,Name,Time,Date,Status\n")
+                f.write("Roll Number,Name,Time,Date,Status,Device\n")
         except: pass
         return {"success": True, "message": "Full system reset complete."}
     return {"success": False, "message": message}
