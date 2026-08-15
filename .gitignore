@@ -34,10 +34,15 @@ venv.bak/
 faces_db/
 *.db
 *.sqlite3
+reports/
+attendance_log.csv
 
-# --- Code Review Graph (Local only) ---
+# --- Code Review Graph & Agents (Local only) ---
 .code-review-graph/
 code-review-graph-data/
+.agents/
+.gemini/
+project_ast_graph.json
 
 # --- OS & Editors ---
 .DS_Store
@@ -57,9 +62,6 @@ deploy.bat
 
 # --- Project Specific & AI Data ---
 static/intruders/
-attendance_log.csv
-project_ast_graph.json
-.gemini/
+static/attendees/
 *.pt
 yolo_test*
-

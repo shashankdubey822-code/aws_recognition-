@@ -6,7 +6,7 @@ import random
 from fastapi import WebSocket
 
 from services.aws_client import search_face_on_aws, register_face_to_aws
-from services.attendance import mark_attendance
+from services.attendance import mark_attendance, parse_identity
 from services.face_detector import detect_faces_crowd
 from services.liveness_engine import score_liveness
 from core.config import MIN_FACE_AREA
@@ -98,23 +98,36 @@ class TrackingController:
                 if face_report and len(face_report) > 0:
                     res = face_report[0]
                     if res["status"] == "match":
-                        self.tracker.objects[obj_id]["name"] = res["name"]
+                        raw_id = res["name"]
+                        display_name, roll_no = parse_identity(raw_id)
+                        
+                        self.tracker.objects[obj_id]["name"] = display_name
+                        self.tracker.objects[obj_id]["roll_number"] = roll_no
                         self.tracker.objects[obj_id]["aws_status"] = "match"
                         self.tracker.objects[obj_id]["score"] = res["score"]
                         
-                        # --- FEDERATED LEARNING (DYNAMIC PROFILES) ---
-                        if res["score"] > 98.0 and not self.tracker.objects[obj_id].get("federated_updated"):
-                            self.tracker.objects[obj_id]["federated_updated"] = True
-                            # We need bytes for federated learning. Let's find it again
-                            for vf in valid_faces:
-                                if vf["box"]["x"] == self.tracker.objects[obj_id]["box"]["x"] and vf["box"]["y"] == self.tracker.objects[obj_id]["box"]["y"]:
-                                    asyncio.create_task(asyncio.to_thread(register_face_to_aws, vf["bytes"], res["name"]))
-                                    break
-                            print(f"[FEDERATED LEARNING] Updated AWS neural profile for {res['name']} (Score: {res['score']})")
+                        # Find face image bytes for snapshot and federated update
+                        matched_bytes = None
+                        for vf in valid_faces:
+                            if vf["box"]["x"] == self.tracker.objects[obj_id]["box"]["x"] and vf["box"]["y"] == self.tracker.objects[obj_id]["box"]["y"]:
+                                matched_bytes = vf["bytes"]
+                                break
 
-                        # Mark Attendance
-                        mark_attendance(res["name"])
-                        await self.websocket.send_json({"type": "attendance", "name": res["name"], "time": "Now"})
+                        # --- FEDERATED LEARNING (DYNAMIC PROFILES) ---
+                        if res["score"] > 98.0 and not self.tracker.objects[obj_id].get("federated_updated") and matched_bytes:
+                            self.tracker.objects[obj_id]["federated_updated"] = True
+                            asyncio.create_task(asyncio.to_thread(register_face_to_aws, matched_bytes, raw_id))
+                            print(f"[FEDERATED LEARNING] Updated AWS neural profile for {display_name} (Score: {res['score']})")
+
+                        # Mark Attendance with photo
+                        status, s_name, s_roll, s_time = mark_attendance(raw_id, matched_bytes)
+                        if status in ("success", "already_marked"):
+                            await self.websocket.send_json({
+                                "type": "attendance", 
+                                "name": display_name, 
+                                "roll_number": roll_no,
+                                "time": s_time or "Now"
+                            })
                     else:
                         self.tracker.objects[obj_id]["aws_status"] = "failed"
 
@@ -173,12 +186,23 @@ class TrackingController:
                     crop_str = f"data:image/jpeg;base64,{base64.b64encode(vf['bytes']).decode()}"
                     break
 
+            display_title = obj["name"]
+            if obj.get("roll_number") and obj["roll_number"] != "N/A" and obj["name"] not in ("Scanning...", "SPOOF DETECTED", "SPOOF CONFIRMED"):
+                display_title = f"{obj['name']} ({obj['roll_number']})"
+
             client_faces.append({
                 "id": object_id,
-                "name": obj["name"],
+                "name": display_title,
+                "raw_name": obj["name"],
+                "roll_number": obj.get("roll_number", "N/A"),
                 "status": obj["aws_status"] if obj["name"] != "Scanning..." else "verifying",
                 "score": obj["score"],
-                "box": {"x": int(obj["box"]["x"]*640), "y": int(obj["box"]["y"]*480), "w": int(obj["box"]["w"]*640), "h": int(obj["box"]["h"]*480)},
+                "box": {
+                    "x": int(obj["box"]["x"]*640), 
+                    "y": int(obj["box"]["y"]*480), 
+                    "w": int(obj["box"]["w"]*640), 
+                    "h": int(obj["box"]["h"]*480)
+                },
                 "crop": crop_str
             })
 

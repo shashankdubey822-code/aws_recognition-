@@ -2,10 +2,12 @@ import base64
 import asyncio
 import sqlite3
 import random
+import re
 from fastapi import WebSocket
 
 from services.aws_client import search_face_on_aws, register_face_to_aws
 from services.face_detector import detect_faces_crowd
+from services.attendance import parse_identity
 from core.state import DB_PATH
 
 class RegistrationController:
@@ -14,9 +16,22 @@ class RegistrationController:
         self.session = None
 
     def start_registration(self, payload: dict):
-        name = payload.get("name")
+        name = payload.get("name", "").strip()
+        roll_number = payload.get("roll_number", "").strip() or "N/A"
+        
+        # Clean identity key for AWS Rekognition external image ID (only [a-zA-Z0-9_.\-:] allowed by AWS)
+        safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', name.replace(" ", "_"))
+        safe_roll = re.sub(r'[^a-zA-Z0-9_]', '_', roll_number)
+        identity_key = f"{safe_roll}__{safe_name}"
+        
         seq = random.sample(["LEFT", "RIGHT", "UP", "DOWN"], 3)
-        self.session = {"name": name, "frames": 0, "sequence": seq}
+        self.session = {
+            "name": name,
+            "roll_number": roll_number,
+            "identity_key": identity_key,
+            "frames": 0,
+            "sequence": seq
+        }
 
     async def process_frame(self, payload: dict):
         if not self.session:
@@ -29,7 +44,11 @@ class RegistrationController:
         faces = await asyncio.to_thread(detect_faces_crowd, image_bytes)
         
         if not faces:
-            await self.websocket.send_json({"type": "registration_waiting", "message": "🔍 No face detected", "progress": int((self.session["frames"]/20)*100)})
+            await self.websocket.send_json({
+                "type": "registration_waiting", 
+                "message": "🔍 No face detected", 
+                "progress": int((self.session["frames"]/20)*100)
+            })
             return
 
         face = faces[0]
@@ -38,10 +57,18 @@ class RegistrationController:
         brightness = face.get("brightness", 100)
         blur = face.get("blur", 100)
         if brightness < 40:
-            await self.websocket.send_json({"type": "registration_waiting", "message": "Lighting too dark. Move to a brighter area.", "progress": int((self.session["frames"]/20)*100)})
+            await self.websocket.send_json({
+                "type": "registration_waiting", 
+                "message": "Lighting too dark. Move to a brighter area.", 
+                "progress": int((self.session["frames"]/20)*100)
+            })
             return
         if blur < 50:
-            await self.websocket.send_json({"type": "registration_waiting", "message": "Camera out of focus. Please hold still.", "progress": int((self.session["frames"]/20)*100)})
+            await self.websocket.send_json({
+                "type": "registration_waiting", 
+                "message": "Camera out of focus. Please hold still.", 
+                "progress": int((self.session["frames"]/20)*100)
+            })
             return
 
         # Active Liveness
@@ -58,7 +85,11 @@ class RegistrationController:
             
             if frames < 5:
                 if not (0.35 < nose_rel_x < 0.65 and 0.35 < nose_rel_y < 0.65):
-                    await self.websocket.send_json({"type": "registration_waiting", "message": "Maintain Center Lock. Look straight ahead.", "progress": int((frames/20)*100)})
+                    await self.websocket.send_json({
+                        "type": "registration_waiting", 
+                        "message": "Maintain Center Lock. Look straight ahead.", 
+                        "progress": int((frames/20)*100)
+                    })
                     return
             else:
                 step = 0
@@ -85,26 +116,42 @@ class RegistrationController:
                         await self.websocket.send_json({"type": "registration_waiting", "message": "Tilt head DOWN to continue.", "progress": int((frames/20)*100)})
                         return
 
-        # Identity Guard
+        # Identity Conflict Guard (First frame check)
         if self.session["frames"] == 0:
             search_results = await asyncio.to_thread(search_face_on_aws, face["bytes"])
             if search_results and any(res["status"] == "match" for res in search_results):
-                match_name = next(res["name"] for res in search_results if res["status"] == "match")
+                matched_raw = next(res["name"] for res in search_results if res["status"] == "match")
+                matched_name, matched_roll = parse_identity(matched_raw)
                 await self.websocket.send_json({
                     "type": "registration_error", 
-                    "message": f"Identity Conflict: This person is already registered as '{match_name.replace('_', ' ')}'."
+                    "message": f"Identity Conflict: Already registered as '{matched_name}' (Roll No: {matched_roll})."
                 })
                 self.session = None
                 return
 
-        success, msg = await asyncio.to_thread(register_face_to_aws, face["bytes"], self.session["name"])
+        # Register Vector Embedding to AWS Rekognition
+        success, msg = await asyncio.to_thread(register_face_to_aws, face["bytes"], self.session["identity_key"])
         if success:
             self.session["frames"] += 1
             progress = int((self.session["frames"]/20)*100)
-            await self.websocket.send_json({"type": "registration_status", "message": f"Angle {self.session['frames']}/20 Secured ✓", "progress": progress})
+            await self.websocket.send_json({
+                "type": "registration_status", 
+                "message": f"Biometric Angle {self.session['frames']}/20 Secured ✓", 
+                "progress": progress
+            })
             if self.session["frames"] >= 20:
-                conn = sqlite3.connect(DB_PATH)
-                conn.execute("INSERT OR IGNORE INTO registered_faces (name) VALUES (?)", (self.session["name"],))
-                conn.commit(); conn.close()
-                await self.websocket.send_json({"type": "registration_success", "message": f"✅ {self.session['name']} profile persistent."})
+                # Save to local SQLite database
+                try:
+                    conn = sqlite3.connect(DB_PATH)
+                    conn.execute("INSERT OR REPLACE INTO registered_faces (roll_number, name) VALUES (?, ?)", 
+                                 (self.session["roll_number"], self.session["name"]))
+                    conn.commit()
+                    conn.close()
+                except Exception as e:
+                    print(f"⚠️ Local DB Error during registration: {e}")
+
+                await self.websocket.send_json({
+                    "type": "registration_success", 
+                    "message": f"✅ Student '{self.session['name']}' (Roll: {self.session['roll_number']}) Registered Successfully."
+                })
                 self.session = None

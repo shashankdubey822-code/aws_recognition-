@@ -10,6 +10,7 @@ aiofiles==23.2.1
 opencv-python-headless
 numpy==1.26.4
 pandas
+openpyxl
 mediapipe==0.10.11
 
 # Liveness Engine (MiniFASNet ONNX — CPU Optimized)
