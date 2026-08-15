@@ -5,7 +5,7 @@ import pandas as pd
 import datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Response, Request, Form, HTTPException, status
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -22,7 +22,7 @@ from core.state import (
 )
 from api.websocket import websocket_endpoint, end_active_session
 from services.aws_client import ensure_collection_exists, delete_all_faces
-from services.email_service import generate_session_excel
+from services.email_service import generate_session_excel, get_latest_email_diagnostics
 
 AUTH_TOKEN_VALUE = "teacher_authenticated_valid_session"
 
@@ -60,143 +60,119 @@ async def lifespan(app: FastAPI):
     
     yield
     # --- SHUTDOWN PHASE ---
-    print("🛑 Shutting down server...")
-    if active_session.get("active"):
-        try:
-            await end_active_session("Server Shutdown")
-        except Exception:
-            pass
+    print("Nexus.AI Attendance Engine Gracefully Stopped.")
 
-# --- FastAPI Application ---
-app = FastAPI(title="Nexus AI — Enterprise Attendance & Surveillance Hub", version="3.2.0", lifespan=lifespan)
+app = FastAPI(title="Nexus.AI Attendance Engine", lifespan=lifespan)
 
+# Mount Static Files
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/raw_frames", StaticFiles(directory="static/raw_frames"), name="raw_frames")
 templates = Jinja2Templates(directory="templates")
 
-# Register the websocket route
-app.add_api_websocket_route("/ws", websocket_endpoint)
+# WebSocket Route
+app.websocket("/ws")(websocket_endpoint)
 
-# --- Authentication Helpers ---
-def is_authenticated(request: Request) -> bool:
-    """Checks if the user has a valid teacher session cookie, token param, or header."""
-    cookie_token = request.cookies.get(SESSION_COOKIE_NAME)
-    query_token = request.query_params.get("token")
-    auth_header = request.headers.get("Authorization", "")
-    
-    if cookie_token == AUTH_TOKEN_VALUE or query_token == AUTH_TOKEN_VALUE or auth_header == f"Bearer {AUTH_TOKEN_VALUE}":
+def is_teacher_authenticated(request: Request) -> bool:
+    """Helper to verify teacher authentication from cookie, header, or query token."""
+    # 1. Check Query Token parameter (Useful for Iframe embedding)
+    token = request.query_params.get("token")
+    if token == AUTH_TOKEN_VALUE:
         return True
-    return False
 
-class LoginRequest(BaseModel):
+    # 2. Check Authorization Bearer Header
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        bearer_token = auth_header.split(" ")[1]
+        if bearer_token == AUTH_TOKEN_VALUE:
+            return True
+
+    # 3. Check Session Cookie
+    cookie_token = request.cookies.get(SESSION_COOKIE_NAME)
+    return cookie_token == AUTH_TOKEN_VALUE
+
+# --- Web Routes ---
+@app.get("/", response_class=HTMLResponse)
+async def read_root(request: Request):
+    """Main Instructor Dashboard view with auto-auth detection."""
+    is_auth = is_teacher_authenticated(request)
+    if not is_auth:
+        return RedirectResponse(url="/login")
+    return templates.TemplateResponse("index.html", {
+        "request": request, 
+        "teacher_email": TEACHER_EMAIL,
+        "is_authenticated": is_auth
+    })
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """Render teacher login page."""
+    if is_teacher_authenticated(request):
+        return RedirectResponse(url="/")
+    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+
+class LoginPayload(BaseModel):
     email: str
     password: str
 
-# --- Authentication Routes ---
-@app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
-    """Renders the teacher login page."""
-    if is_authenticated(request):
-        return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
-
 @app.post("/api/login")
-async def api_login(data: LoginRequest):
-    """JSON API for iframe/cross-origin authentication in Hugging Face."""
-    clean_email = data.email.strip().lower()
-    clean_pass = data.password.strip()
-
-    if clean_email == TEACHER_EMAIL.lower() and clean_pass == TEACHER_PASSWORD:
+async def api_login(payload: LoginPayload):
+    """JSON Login endpoint designed for Iframes / LocalStorage persistence."""
+    if payload.email.strip() == TEACHER_EMAIL and payload.password == TEACHER_PASSWORD:
         response = JSONResponse({
             "success": True, 
             "token": AUTH_TOKEN_VALUE, 
-            "redirect": f"/?token={AUTH_TOKEN_VALUE}"
+            "email": TEACHER_EMAIL,
+            "redirect_url": f"/?token={AUTH_TOKEN_VALUE}"
         })
         response.set_cookie(
             key=SESSION_COOKIE_NAME,
             value=AUTH_TOKEN_VALUE,
-            max_age=86400,
             httponly=False,
             samesite="none",
-            secure=True
+            secure=True,
+            max_age=86400 * 7
         )
         return response
-    return JSONResponse(
-        status_code=401, 
-        content={"success": False, "message": "Invalid Teacher ID or Password."}
-    )
+    return JSONResponse(status_code=401, content={"success": False, "message": "Invalid email or password"})
 
 @app.post("/login", response_class=HTMLResponse)
-async def handle_login(
+async def login_submit(
     request: Request,
     email: str = Form(...),
     password: str = Form(...)
 ):
-    """Processes teacher login form credentials (standard POST)."""
-    clean_email = email.strip().lower()
-    clean_pass = password.strip()
-
-    if clean_email == TEACHER_EMAIL.lower() and clean_pass == TEACHER_PASSWORD:
+    """Handles teacher login form submission."""
+    if email.strip() == TEACHER_EMAIL and password == TEACHER_PASSWORD:
         response = RedirectResponse(url=f"/?token={AUTH_TOKEN_VALUE}", status_code=status.HTTP_302_FOUND)
         response.set_cookie(
             key=SESSION_COOKIE_NAME,
             value=AUTH_TOKEN_VALUE,
-            max_age=86400,
             httponly=False,
             samesite="none",
-            secure=True
+            secure=True,
+            max_age=86400 * 7
         )
         return response
-    else:
-        return templates.TemplateResponse(
-            "login.html", 
-            {"request": request, "error": "Invalid Teacher ID or Password. Please try again."}
-        )
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "error": "Invalid email or password. Access Denied."
+    }, status_code=status.HTTP_401_UNAUTHORIZED)
 
 @app.get("/logout")
-async def handle_logout():
-    """Logs out teacher and redirects to login."""
-    response = RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+async def logout(request: Request):
+    """Logs out the teacher and clears session cookie."""
+    response = RedirectResponse(url="/login")
     response.delete_cookie(SESSION_COOKIE_NAME)
     return response
 
-# --- Protected Teacher Dashboard ---
-@app.get("/", response_class=HTMLResponse)
-async def read_root(request: Request):
-    """Serves the main teacher monitoring dashboard."""
-    token = request.query_params.get("token")
-    
-    response = templates.TemplateResponse("index.html", {
-        "request": request,
-        "teacher_email": TEACHER_EMAIL,
-        "default_duration": DEFAULT_SESSION_DURATION_MIN,
-        "is_authenticated": is_authenticated(request)
-    })
-    
-    if token == AUTH_TOKEN_VALUE:
-        response.set_cookie(
-            key=SESSION_COOKIE_NAME,
-            value=AUTH_TOKEN_VALUE,
-            max_age=86400,
-            httponly=False,
-            samesite="none",
-            secure=True
-        )
-        
-    return response
-
-# --- Export Logs & Reports ---
 @app.get("/logs")
 async def download_logs(request: Request):
-    """Download the formatted overall attendance CSV file."""
+    """Export attendance CSV log."""
     if not os.path.exists(LOG_FILE):
-        return {"error": "Attendance log not found yet. Mark some attendance first!"}
+        return {"message": "No attendance records found."}
+    
     try:
         df = pd.read_csv(LOG_FILE)
-        if not df.empty and 'Name' in df.columns:
-            df['Name'] = df['Name'].apply(lambda x: str(x).replace('_', ' ').title())
-            if 'Status' not in df.columns:
-                df['Status'] = 'CLEARANCE GRANTED'
-            
         csv_content = df.to_csv(index=False)
         filename = f"Master_Attendance_Log_{datetime.datetime.now().strftime('%Y-%m-%d')}.csv"
         
@@ -218,6 +194,11 @@ async def download_report_file(filename: str, request: Request):
     media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if filename.endswith(".xlsx") else "text/csv"
     return FileResponse(filepath, media_type=media_type, filename=filename)
 
+@app.get("/api/email_diagnostics", response_class=PlainTextResponse)
+async def get_email_error_diagnostics():
+    """Dedicated error diagnosis file viewer for email dispatching."""
+    return get_latest_email_diagnostics()
+
 @app.post("/api/clear_frames")
 async def clear_raw_frames(request: Request):
     """Purge all stored raw uncropped frames and reset device frame buffers."""
@@ -228,6 +209,7 @@ async def clear_raw_frames(request: Request):
         
         for dev_id in connected_devices:
             connected_devices[dev_id]["raw_frames"] = []
+            connected_devices[dev_id]["cropped_queue"] = []
             connected_devices[dev_id]["total_frames"] = 0
             
         return {"success": True, "message": "Raw frame cache cleared successfully."}
@@ -247,6 +229,7 @@ async def wipe_faces(request: Request):
         for dev_id in connected_devices:
             connected_devices[dev_id]["verified_students"] = []
             connected_devices[dev_id]["raw_frames"] = []
+            connected_devices[dev_id]["cropped_queue"] = []
             connected_devices[dev_id]["total_frames"] = 0
         try:
             with open(LOG_FILE, "w", encoding="utf-8") as f: 

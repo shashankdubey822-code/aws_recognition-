@@ -2,14 +2,12 @@ import time
 import json
 import base64
 import asyncio
-import random
 from datetime import datetime
 from fastapi import WebSocket
 
 from services.aws_client import search_face_on_aws, register_face_to_aws
 from services.attendance import mark_attendance, parse_identity
 from services.face_detector import detect_faces_crowd
-from services.liveness_engine import score_liveness
 from core.config import MIN_FACE_AREA
 from core.state import connected_devices
 
@@ -17,7 +15,6 @@ class TrackingController:
     def __init__(self, websocket: WebSocket, broadcast_func=None):
         self.websocket = websocket
         self.broadcast_func = broadcast_func or websocket.send_json
-        self.last_intruder_time = 0
 
     async def broadcast_event(self, event_dict: dict):
         """Dispatches telemetry event to ALL connected dashboard browsers."""
@@ -64,29 +61,13 @@ class TrackingController:
             })
             return
 
-        # 3. Create FIFO Cropped Queue Items
+        # 3. Create FIFO Cropped Queue Items (Direct to AWS — NO SPOOF BLOCKING)
         queue_items = []
         search_tasks = []
         
         for idx, vf in enumerate(valid_faces):
             crop_b64 = "data:image/jpeg;base64," + base64.b64encode(vf["bytes"]).decode('utf-8')
             q_id = f"q_{int(time.time()*1000)}_{idx}"
-            
-            # Check FFT anti-spoof
-            fft_val = vf.get("fft_max_hf", 0.0)
-            if fft_val > 240.0:
-                q_item = {
-                    "id": q_id,
-                    "time": datetime.now().strftime("%H:%M:%S"),
-                    "crop": crop_b64,
-                    "status": "spoof",
-                    "name": "SPOOF DETECTED",
-                    "roll_number": "N/A",
-                    "score": 0.0,
-                    "result": "🛑 LIVENESS FAILED — Digital Screen / Moiré Detected"
-                }
-                queue_items.append(q_item)
-                continue
 
             q_item = {
                 "id": q_id,
@@ -178,5 +159,5 @@ class TrackingController:
             "type": "device_stage_update",
             "device_id": dev_id,
             "stage": "IDLE",
-            "message": f"Cycle Complete ({len(valid_faces)} Faces Verified)"
+            "message": f"Cycle Complete ({len(valid_faces)} Faces Processed)"
         })

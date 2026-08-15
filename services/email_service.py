@@ -1,5 +1,6 @@
 import os
 import smtplib
+import traceback
 import pandas as pd
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
@@ -12,6 +13,31 @@ from core.config import (
     SMTP_SERVER, SMTP_PORT, SMTP_EMAIL, SMTP_PASSWORD, 
     TEACHER_REPORT_EMAIL, REPORTS_DIR
 )
+
+DIAGNOSTICS_FILE = os.path.join(REPORTS_DIR, "email_error_diagnostics.txt")
+
+def log_email_diagnostic(stage: str, status: str, details: str):
+    """Writes detailed step-by-step diagnostic trace to dedicated error file."""
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_line = f"[{timestamp}] [{stage}] [{status}] {details}\n"
+    print(log_line.strip())
+    try:
+        with open(DIAGNOSTICS_FILE, "a", encoding="utf-8") as f:
+            f.write(log_line)
+    except Exception as e:
+        print(f"Failed writing to email log file: {e}")
+
+def get_latest_email_diagnostics() -> str:
+    """Reads the dedicated email diagnostic log."""
+    if os.path.exists(DIAGNOSTICS_FILE):
+        try:
+            with open(DIAGNOSTICS_FILE, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                return "".join(lines[-40:]) # Return latest 40 entries
+        except Exception as e:
+            return f"Error reading log: {e}"
+    return "No email dispatch operations recorded yet."
 
 def generate_session_excel(session_data: dict) -> str:
     """Generates a styled Excel / CSV attendance report for a concluded session."""
@@ -39,40 +65,53 @@ def generate_session_excel(session_data: dict) -> str:
         df = pd.DataFrame(columns=["S.No", "Roll Number", "Student Name", "Time Marked", "Date", "Status"])
         
     try:
-        # Try writing to Excel (.xlsx)
         df.to_excel(filepath, index=False, sheet_name="Attendance_Session")
     except Exception as e:
-        # Fallback to CSV if openpyxl engine is missing
         csv_filename = f"Attendance_Report_{session_id}_{timestamp}.csv"
         filepath = os.path.join(REPORTS_DIR, csv_filename)
         df.to_csv(filepath, index=False)
-        print(f"ℹ️ Saved as CSV ({filepath}) due to: {e}")
         
     return filepath
 
 def send_session_email_report(session_data: dict, recipient: str = None) -> tuple[bool, str]:
-    """Sends session summary and Excel report via SMTP to the teacher."""
+    """Sends session summary and Excel report via SMTP to the teacher with full step-by-step diagnostic tracing."""
     target_email = recipient or TEACHER_REPORT_EMAIL
-    
-    # Generate the report file
-    report_path = generate_session_excel(session_data)
-    attendees = session_data.get("attendees", [])
     session_id = session_data.get("id", "LIVE_SESSION")
-    start_time = session_data.get("start_time", "N/A")
+    attendees = session_data.get("attendees", [])
     duration = session_data.get("duration_minutes", 50)
     
-    if not SMTP_EMAIL or not SMTP_PASSWORD:
-        msg = f"Report saved locally to {report_path}. (SMTP credentials not configured in .env. Target recipient: {target_email})"
-        print(f"⚠️ {msg}")
-        return False, msg
+    log_email_diagnostic("DISPATCH_TRIGGER", "START", f"Initiating email dispatch for session '{session_id}' (Total Attendees: {len(attendees)}, Recipient: {target_email})")
+    
+    # 1. Step: Check Credentials
+    has_email = bool(SMTP_EMAIL and SMTP_EMAIL.strip())
+    has_pass = bool(SMTP_PASSWORD and SMTP_PASSWORD.strip())
+    
+    log_email_diagnostic(
+        "ENV_CONFIG_CHECK", 
+        "CHECK", 
+        f"SMTP_SERVER='{SMTP_SERVER}', SMTP_PORT={SMTP_PORT}, SMTP_EMAIL={'CONFIGURED (' + SMTP_EMAIL + ')' if has_email else 'MISSING / EMPTY'}, SMTP_PASSWORD={'CONFIGURED (LENGTH ' + str(len(SMTP_PASSWORD)) + ')' if has_pass else 'MISSING / EMPTY'}"
+    )
+    
+    report_path = generate_session_excel(session_data)
+    log_email_diagnostic("REPORT_GENERATION", "SUCCESS", f"Generated workbook at '{report_path}'")
+    
+    if not has_email or not has_pass:
+        error_explanation = (
+            "🚨 CRITICAL EMAIL CONFIGURATION ERROR: "
+            "SMTP_EMAIL or SMTP_PASSWORD environment variable is empty! "
+            "To fix: Open Hugging Face Settings -> Variables and secrets -> Add 'SMTP_EMAIL' and 'SMTP_PASSWORD' (Google App Password)."
+        )
+        log_email_diagnostic("CREDENTIAL_VALIDATION", "FAILED", error_explanation)
+        return False, error_explanation
 
     try:
+        # 2. Step: Build MIME Message
+        log_email_diagnostic("MIME_BUILD", "IN_PROGRESS", "Compiling HTML body and embedding student snapshots...")
         msg = MIMEMultipart("related")
         msg["From"] = f"Nexus AI Attendance <{SMTP_EMAIL}>"
         msg["To"] = target_email
         msg["Subject"] = f"📊 Attendance Session Report [{session_id}] - {len(attendees)} Present"
         
-        # Build HTML Email Body
         table_rows = ""
         for idx, att in enumerate(attendees, 1):
             table_rows += f"""
@@ -141,7 +180,7 @@ def send_session_email_report(session_data: dict, recipient: str = None) -> tupl
         msg_body = MIMEText(html_content, "html")
         msg.attach(msg_body)
         
-        # Attach the Excel / CSV file
+        # Attach Excel file
         if os.path.exists(report_path):
             with open(report_path, "rb") as f:
                 attachment = MIMEBase("application", "octet-stream")
@@ -151,7 +190,8 @@ def send_session_email_report(session_data: dict, recipient: str = None) -> tupl
             attachment.add_header("Content-Disposition", f"attachment; filename={base_filename}")
             msg.attach(attachment)
             
-        # Attach all student verification snapshots
+        # Attach student photos
+        attached_photos_count = 0
         for att in attendees:
             photo_rel = att.get("photo")
             if photo_rel and photo_rel.startswith("/"):
@@ -163,20 +203,42 @@ def send_session_email_report(session_data: dict, recipient: str = None) -> tupl
                             img_part = MIMEImage(img_data)
                             img_part.add_header("Content-Disposition", f"attachment; filename={os.path.basename(photo_local)}")
                             msg.attach(img_part)
+                            attached_photos_count += 1
                     except Exception as e:
-                        print(f"⚠️ Error attaching image {photo_local}: {e}")
+                        log_email_diagnostic("PHOTO_ATTACH", "WARNING", f"Could not attach {photo_local}: {e}")
 
-        # Connect to SMTP Server
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10)
+        log_email_diagnostic("MIME_BUILD", "SUCCESS", f"MIME message ready (Excel + {attached_photos_count} student photos attached)")
+
+        # 3. Step: Connect to SMTP Server
+        log_email_diagnostic("SMTP_CONNECT", "CONNECTING", f"Connecting to {SMTP_SERVER}:{SMTP_PORT} via TLS...")
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
         server.starttls()
+        log_email_diagnostic("SMTP_CONNECT", "SUCCESS", "TLS handshake established.")
+        
+        # 4. Step: Authenticate
+        log_email_diagnostic("SMTP_AUTH", "AUTHENTICATING", f"Authenticating as '{SMTP_EMAIL}'...")
         server.login(SMTP_EMAIL, SMTP_PASSWORD)
+        log_email_diagnostic("SMTP_AUTH", "SUCCESS", "Google SMTP Authentication Granted!")
+
+        # 5. Step: Send Message
+        log_email_diagnostic("SMTP_SEND", "DISPATCHING", f"Transmitting message to recipient '{target_email}'...")
         server.send_message(msg)
         server.quit()
         
-        print(f"✅ Successfully dispatched session report email to {target_email}")
-        return True, f"Email successfully sent to {target_email} with report {os.path.basename(report_path)}"
+        success_msg = f"✅ EMAIL DELIVERED SUCCESSFULLY to {target_email} with report {os.path.basename(report_path)}"
+        log_email_diagnostic("EMAIL_PIPELINE", "SUCCESS", success_msg)
+        return True, success_msg
 
+    except smtplib.SMTPAuthenticationError as auth_err:
+        err_msg = f"Google SMTP Authentication Rejected (Code {auth_err.smtp_code}): Check your 16-character App Password."
+        log_email_diagnostic("SMTP_AUTH", "FAILED", err_msg)
+        return False, err_msg
+    except smtplib.SMTPConnectError as conn_err:
+        err_msg = f"Could not connect to SMTP server {SMTP_SERVER}:{SMTP_PORT}: {conn_err}"
+        log_email_diagnostic("SMTP_CONNECT", "FAILED", err_msg)
+        return False, err_msg
     except Exception as e:
-        err_msg = f"Failed to send email: {e}"
-        print(f"🔴 SMTP Error: {err_msg}")
+        full_trace = traceback.format_exc()
+        err_msg = f"Unexpected SMTP failure: {e}\n{full_trace}"
+        log_email_diagnostic("EMAIL_PIPELINE", "CRITICAL_ERROR", err_msg)
         return False, err_msg
