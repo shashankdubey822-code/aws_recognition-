@@ -265,6 +265,14 @@ function renderDevicesView() {
         };
 
         const studentsCount = (dev.verified_students || []).length;
+        const stage = dev.stage || 'IDLE';
+        let stageBadge = '';
+
+        if (stage === 'CROPPING') {
+            stageBadge = '<span class="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 animate-pulse">✂️ AI CROPPING</span>';
+        } else if (stage === 'AWS_MATCHING') {
+            stageBadge = '<span class="text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 animate-pulse">🔄 AWS SCANNING</span>';
+        }
 
         card.innerHTML = `
             <div class="flex justify-between items-start">
@@ -272,13 +280,16 @@ function renderDevicesView() {
                     <span class="w-2.5 h-2.5 rounded-full ${isActive ? 'bg-brand-emerald animate-ping' : 'bg-slate-500'}"></span>
                     <h4 class="font-bold text-white font-mono text-xs">${dev.device_name}</h4>
                 </div>
-                <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
-                    isActive 
-                        ? 'bg-brand-emerald/20 text-brand-emerald border-brand-emerald/40' 
-                        : 'bg-slate-800 text-slate-400 border-slate-700'
-                }">
-                    ${isActive ? 'ACTIVE' : 'STANDBY'}
-                </span>
+                <div class="flex items-center gap-1.5">
+                    ${stageBadge}
+                    <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
+                        isActive 
+                            ? 'bg-brand-emerald/20 text-brand-emerald border-brand-emerald/40' 
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                    }">
+                        ${isActive ? 'ACTIVE' : 'STANDBY'}
+                    </span>
+                </div>
             </div>
             <div class="grid grid-cols-3 gap-2 text-[11px] font-mono text-slate-400 mt-1 pt-2 border-t border-white/5">
                 <div><span class="text-slate-500">IP:</span> ${dev.client_ip || '127.0.0.1'}</div>
@@ -300,12 +311,22 @@ function renderSelectedDeviceDetails() {
 
     if (selectedDeviceName) selectedDeviceName.textContent = dev.device_name;
     if (selectedDeviceSubmeta) selectedDeviceSubmeta.textContent = `IP: ${dev.client_ip} | Registered: ${dev.first_seen} | Total Frames: ${dev.total_frames}`;
+    
     if (selectedDeviceStatusBadge) {
-        selectedDeviceStatusBadge.textContent = dev.status === 'active' ? 'STREAMING ACTIVE' : 'STANDBY / IDLE';
-        selectedDeviceStatusBadge.className = dev.status === 'active' 
-            ? 'text-xs font-mono text-brand-emerald bg-brand-emerald/10 px-3 py-1 rounded-lg border border-brand-emerald/30'
-            : 'text-xs font-mono text-slate-400 bg-slate-800 px-3 py-1 rounded-lg border border-slate-700';
+        if (dev.stage === 'CROPPING') {
+            selectedDeviceStatusBadge.textContent = '✂️ LOCAL AI EXTRACTING FACES...';
+            selectedDeviceStatusBadge.className = 'text-xs font-mono text-purple-400 bg-purple-500/10 px-3 py-1 rounded-lg border border-purple-500/30 animate-pulse';
+        } else if (dev.stage === 'AWS_MATCHING') {
+            selectedDeviceStatusBadge.textContent = '🔄 CONTACTING AWS REKOGNITION...';
+            selectedDeviceStatusBadge.className = 'text-xs font-mono text-cyan-400 bg-cyan-500/10 px-3 py-1 rounded-lg border border-cyan-500/30 animate-pulse';
+        } else {
+            selectedDeviceStatusBadge.textContent = dev.status === 'active' ? 'STREAMING ACTIVE (15s CYCLE)' : 'STANDBY / IDLE';
+            selectedDeviceStatusBadge.className = dev.status === 'active' 
+                ? 'text-xs font-mono text-brand-emerald bg-brand-emerald/10 px-3 py-1 rounded-lg border border-brand-emerald/30'
+                : 'text-xs font-mono text-slate-400 bg-slate-800 px-3 py-1 rounded-lg border border-slate-700';
+        }
     }
+    
     if (selectedDeviceIndicator) {
         selectedDeviceIndicator.className = `w-3 h-3 rounded-full ${dev.status === 'active' ? 'bg-brand-emerald animate-ping' : 'bg-slate-500'}`;
     }
@@ -767,6 +788,21 @@ function connectWebSocket() {
             return;
         }
 
+        // --- DEVICE STAGE TELEMETRY ANIMATION ---
+        if (data.type === 'device_stage_update') {
+            const devId = data.device_id;
+            if (allDevicesMap[devId]) {
+                allDevicesMap[devId].stage = data.stage;
+                if (data.stage === 'CROPPING') {
+                    logToTerminal(`[${allDevicesMap[devId].device_name}] 📸 Frame Ingested ➔ Local AI Face Detection active...`, 'info');
+                } else if (data.stage === 'AWS_MATCHING') {
+                    logToTerminal(`[${allDevicesMap[devId].device_name}] 🔄 ${data.message}`, 'info');
+                }
+            }
+            renderDevicesView();
+            return;
+        }
+
         // --- LIVE AWS FIFO CROPPED QUEUE UPDATE ---
         if (data.type === 'aws_queue_update') {
             const devId = data.device_id;
@@ -878,11 +914,14 @@ function connectWebSocket() {
             
             if (allDevicesMap[devId]) {
                 if (!allDevicesMap[devId].verified_students) allDevicesMap[devId].verified_students = [];
-                allDevicesMap[devId].verified_students.unshift({
-                    name: displayName,
-                    roll_number: rollNumber,
-                    time: data.time
-                });
+                const alreadyInDev = allDevicesMap[devId].verified_students.some(s => s.name === displayName);
+                if (!alreadyInDev) {
+                    allDevicesMap[devId].verified_students.unshift({
+                        name: displayName,
+                        roll_number: rollNumber,
+                        time: data.time
+                    });
+                }
                 renderDevicesView();
             }
             return;

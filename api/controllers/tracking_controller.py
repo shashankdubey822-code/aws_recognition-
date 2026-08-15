@@ -15,9 +15,20 @@ from core.tracker import CentroidTracker
 from core.state import connected_devices
 
 class TrackingController:
-    def __init__(self, websocket: WebSocket):
+    def __init__(self, websocket: WebSocket, broadcast_func=None):
         self.websocket = websocket
+        self.broadcast_func = broadcast_func or websocket.send_json
         self.tracker = CentroidTracker(max_disappeared=15, max_distance=0.15)
+
+    async def broadcast_event(self, event_dict: dict):
+        """Dispatches telemetry event to ALL connected dashboard browsers."""
+        try:
+            await self.broadcast_func(event_dict)
+        except Exception as e:
+            try:
+                await self.websocket.send_json(event_dict)
+            except Exception:
+                pass
 
     async def process_frame(self, payload: dict):
         encoded_data = payload["image"].split(',')[1]
@@ -26,10 +37,17 @@ class TrackingController:
         dev_id = payload.get("device_id", "edge_device")
         dev_name = payload.get("device_name", "Edge Node")
 
-        # 1. Detect faces locally using Mediapipe crowd detector
+        # Broadcast Stage 1: Local AI Face Cropping
+        await self.broadcast_event({
+            "type": "device_stage_update",
+            "device_id": dev_id,
+            "stage": "CROPPING",
+            "message": "Local AI Model Extracting Faces..."
+        })
+
+        # 1. Detect faces locally using Mediapipe crowd detector in thread pool
         all_faces = await asyncio.to_thread(detect_faces_crowd, image_bytes)
         
-        # Filter out small faces (posters/backgrounds)
         valid_faces = []
         for face in all_faces:
             area = face["box"]["w"] * face["box"]["h"]
@@ -45,7 +63,6 @@ class TrackingController:
 
         # 3. Liveness Analysis & Search Pipeline
         for idx, (object_id, obj) in enumerate(tracked_objects.items()):
-            # Liveness Scoring
             for vf in valid_faces:
                 if vf["box"]["x"] == obj["box"]["x"] and vf["box"]["y"] == obj["box"]["y"]:
                     liveness_score, liveness_reason = score_liveness(
@@ -77,7 +94,7 @@ class TrackingController:
                         try:
                             with open(filepath, "wb") as f:
                                 f.write(vf["bytes"])
-                            await self.websocket.send_json({
+                            await self.broadcast_event({
                                 "type": "intruder_alert",
                                 "message": "UNREGISTERED ENTITY DETECTED",
                                 "image": f"/static/intruders/intruder_{timestamp}.jpg"
@@ -108,7 +125,7 @@ class TrackingController:
                         break
                 continue
 
-            # If face is still scanning and we haven't asked AWS 3 times
+            # If face is still scanning
             if obj["aws_status"] == "unknown" and obj["aws_calls"] < 3 and obj["liveness"] == "real":
                 for vf in valid_faces:
                     if vf["box"]["x"] == obj["box"]["x"] and vf["box"]["y"] == obj["box"]["y"]:
@@ -125,12 +142,35 @@ class TrackingController:
                             "name": "Scanning...",
                             "roll_number": "...",
                             "score": 0.0,
-                            "result": "🔄 Enqueued in FIFO Pipeline — Contacting AWS Rekognition..."
+                            "result": "🔄 Enqueued in FIFO Pipeline — Dispatched to AWS..."
                         }
                         queue_items.append(q_item)
                         break
 
-        # Run AWS calls in parallel
+        # Broadcast Stage 2: AWS Rekognition Matching & Initial Enqueue
+        if queue_items:
+            if dev_id in connected_devices:
+                if "cropped_queue" not in connected_devices[dev_id]:
+                    connected_devices[dev_id]["cropped_queue"] = []
+                for qi in queue_items:
+                    connected_devices[dev_id]["cropped_queue"].insert(0, qi)
+                if len(connected_devices[dev_id]["cropped_queue"]) > 25:
+                    connected_devices[dev_id]["cropped_queue"] = connected_devices[dev_id]["cropped_queue"][:25]
+
+            await self.broadcast_event({
+                "type": "device_stage_update",
+                "device_id": dev_id,
+                "stage": "AWS_MATCHING",
+                "message": f"Contacting AWS Cloud AI ({len(queue_items)} faces)..."
+            })
+
+            await self.broadcast_event({
+                "type": "aws_queue_update",
+                "device_id": dev_id,
+                "queue": connected_devices.get(dev_id, {}).get("cropped_queue", queue_items)
+            })
+
+        # Run AWS calls in parallel threads
         if search_tasks:
             aws_results = await asyncio.gather(*search_tasks)
             for i, face_report in enumerate(aws_results):
@@ -146,7 +186,6 @@ class TrackingController:
                         self.tracker.objects[obj_id]["aws_status"] = "match"
                         self.tracker.objects[obj_id]["score"] = res["score"]
 
-                        # Find face image bytes for snapshot and federated update
                         matched_bytes = None
                         for vf in valid_faces:
                             if vf["box"]["x"] == self.tracker.objects[obj_id]["box"]["x"] and vf["box"]["y"] == self.tracker.objects[obj_id]["box"]["y"]:
@@ -162,7 +201,7 @@ class TrackingController:
                         # Mark Attendance with photo and device_id mapping
                         status, s_name, s_roll, s_time = mark_attendance(raw_id, matched_bytes, device_id=dev_id)
                         if status in ("success", "already_marked"):
-                            await self.websocket.send_json({
+                            await self.broadcast_event({
                                 "type": "attendance", 
                                 "name": display_name, 
                                 "roll_number": roll_no,
@@ -192,70 +231,23 @@ class TrackingController:
                         queue_items[i]["roll_number"] = "N/A"
                         queue_items[i]["result"] = "❌ NO MATCH IN AWS DATABASE — Identity Unregistered"
 
-        # Update per-device FIFO cropped queue
-        if queue_items and dev_id in connected_devices:
-            if "cropped_queue" not in connected_devices[dev_id]:
-                connected_devices[dev_id]["cropped_queue"] = []
-            for qi in queue_items:
-                connected_devices[dev_id]["cropped_queue"].insert(0, qi)
-            if len(connected_devices[dev_id]["cropped_queue"]) > 25:
-                connected_devices[dev_id]["cropped_queue"] = connected_devices[dev_id]["cropped_queue"][:25]
-
-            # Broadcast FIFO Queue update to connected UI clients
-            await self.websocket.send_json({
-                "type": "aws_queue_update",
-                "device_id": dev_id,
-                "queue": connected_devices[dev_id]["cropped_queue"]
-            })
-
-        # --- CHALLENGE-RESPONSE ENGINE ---
-        SPOOF_STREAK_THRESHOLD = 20  # ~2 seconds of continuous spoof detection
-        for object_id, obj in tracked_objects.items():
-            c_state = obj.get("challenge_state")
-
-            if obj["spoof_streak"] >= SPOOF_STREAK_THRESHOLD and c_state is None:
-                instruction = random.choice(["LEFT", "RIGHT", "UP", "DOWN"])
-                baseline = (0.5, 0.5)
-                hist = obj.get("landmarks_history", [])
-                if hist:
-                    last = hist[-1]
-                    baseline = (last[1], 0.5)
-
-                self.tracker.objects[object_id]["challenge_state"] = "active"
-                self.tracker.objects[object_id]["challenge_instruction"] = instruction
-                self.tracker.objects[object_id]["challenge_baseline"] = baseline
-                self.tracker.objects[object_id]["challenge_compliance_frames"] = 0
-                self.tracker.objects[object_id]["challenge_start_time"] = time.time()
-                print(f"[CHALLENGE] 🎯 Issuing challenge to face {object_id}: {instruction}")
-                await self.websocket.send_json({
-                    "type": "challenge",
-                    "face_id": object_id,
-                    "instruction": instruction
+        # Broadcast Final Updated FIFO Queue & Stage Complete
+        if queue_items:
+            if dev_id in connected_devices and "cropped_queue" in connected_devices[dev_id]:
+                await self.broadcast_event({
+                    "type": "aws_queue_update",
+                    "device_id": dev_id,
+                    "queue": connected_devices[dev_id]["cropped_queue"]
                 })
 
-            elif c_state == "verified_real":
-                self.tracker.objects[object_id]["challenge_state"] = None
-                await self.websocket.send_json({
-                    "type": "challenge_passed",
-                    "face_id": object_id,
-                    "message": "✅ Liveness Confirmed — Identity Verification Proceeding"
-                })
+        await self.broadcast_event({
+            "type": "device_stage_update",
+            "device_id": dev_id,
+            "stage": "IDLE",
+            "message": f"Cycle Complete ({len(valid_faces)} Faces Scanned)"
+        })
 
-            elif c_state == "active":
-                start_t = obj.get("challenge_start_time", time.time())
-                if time.time() - start_t > 15:
-                    self.tracker.objects[object_id]["challenge_state"] = "verified_spoof"
-                    self.tracker.objects[object_id]["liveness"] = "spoof"
-                    self.tracker.objects[object_id]["aws_status"] = "spoof"
-                    self.tracker.objects[object_id]["name"] = "SPOOF CONFIRMED"
-                    print(f"[CHALLENGE] ❌ Face {object_id} FAILED challenge — timeout")
-                    await self.websocket.send_json({
-                        "type": "challenge_failed",
-                        "face_id": object_id,
-                        "message": "❌ Challenge Failed — Spoof Confirmed"
-                    })
-
-        # Prepare UI Response
+        # Prepare Web Response for local video overlays
         client_faces = []
         for object_id, obj in tracked_objects.items():
             crop_str = ""

@@ -6,8 +6,8 @@ High-definition, bandwidth-efficient camera client for Raspberry Pi / Edge nodes
 - Full HD 1080p/720p hardware capture with MJPEG stream.
 - Built-in Dynamic Low-Light Brightness & CLAHE Contrast Enhancer (no torch needed).
 - Captures crisp, sharp facial features for 99%+ AWS Rekognition accuracy.
-- Stands by in low-power mode with camera OFF until teacher triggers session.
-- Automatically wakes up camera, enhances illumination, and sends clean frames.
+- Captures 1 fresh uncropped frame every 15 seconds (configurable) during active session.
+- Automatically stands by with camera OFF until teacher starts session from dashboard.
 """
 
 import sys
@@ -23,7 +23,7 @@ import websockets
 import cv2
 
 DEFAULT_SERVER_WS = "wss://vrfefavr-hugging-face.hf.space/ws"
-DEFAULT_INTERVAL_SEC = 30.0
+DEFAULT_INTERVAL_SEC = 15.0  # 15 seconds between classroom captures
 DEFAULT_CAMERA_INDEX = 0
 
 def get_local_ip():
@@ -44,27 +44,22 @@ def enhance_frame_illumination(frame):
     Reveals crisp facial features in low-light environments without blowing out highlights.
     """
     try:
-        # 1. Calculate overall scene luminance
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         mean_lum = np.mean(gray)
 
-        # 2. Convert to LAB color space to process luminance independently of chrominance
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         l_channel, a_channel, b_channel = cv2.split(lab)
 
-        # 3. Apply Contrast Limited Adaptive Histogram Equalization
         clip_limit = 3.5 if mean_lum < 50 else (2.5 if mean_lum < 90 else 1.8)
         clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
         enhanced_l = clahe.apply(l_channel)
 
-        # 4. Apply dynamic gamma curve if room is dark
         if mean_lum < 90:
             gamma = 0.55 if mean_lum < 40 else 0.72
             inv_gamma = 1.0 / gamma
             table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
             enhanced_l = cv2.LUT(enhanced_l, table)
 
-        # 5. Merge and return crisp BGR frame
         merged = cv2.merge((enhanced_l, a_channel, b_channel))
         result = cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
         return result
@@ -73,13 +68,13 @@ def enhance_frame_illumination(frame):
 
 class RaspberryPiEdgeClient:
     def __init__(self, server_url: str, device_name: str, device_id: str, hf_token: str = None, 
-                 interval: float = 30.0, camera_index: int = 0, width: int = 1280, height: int = 720,
+                 interval: float = 15.0, camera_index: int = 0, width: int = 1280, height: int = 720,
                  auto_enhance: bool = True):
         self.server_url = server_url
         self.device_name = device_name
         self.device_id = device_id
         self.hf_token = hf_token or os.getenv("HF_TOKEN")
-        self.interval = interval
+        self.interval = max(3.0, float(interval))
         self.camera_index = camera_index
         self.width = width
         self.height = height
@@ -99,19 +94,16 @@ class RaspberryPiEdgeClient:
         print(f"[EDGE CAMERA] 📷 Initializing HD Camera (Index {self.camera_index}, {self.width}x{self.height})...")
         try:
             self.cap = cv2.VideoCapture(self.camera_index)
-            # Request hardware MJPEG mode for high framerate and uncompressed HD quality
             self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
             
-            # Enable hardware auto-exposure if supported
             try:
                 self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
             except Exception:
                 pass
                 
             if self.cap.isOpened():
-                # Allow camera sensor auto-exposure to settle by reading 5 warmup frames
                 for _ in range(5):
                     self.cap.read()
                 print("✅ HD Camera sensor stabilized and ready.")
@@ -139,17 +131,14 @@ class RaspberryPiEdgeClient:
             if not self.open_camera():
                 return None
         
-        # Grab fresh frame
         ret, frame = self.cap.read()
         if not ret or frame is None:
             print("⚠️ Failed to grab frame from camera.")
             return None
         
-        # Apply low-light & contrast enhancement
         if self.auto_enhance:
             frame = enhance_frame_illumination(frame)
         
-        # Encode to maximum quality JPEG (95% quality for razor-sharp AWS Rekognition face matching)
         encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 95]
         success, buffer = cv2.imencode('.jpg', frame, encode_param)
         if not success:
@@ -159,12 +148,10 @@ class RaspberryPiEdgeClient:
         return f"data:image/jpeg;base64,{b64_str}"
 
     async def streaming_loop(self):
-        """Streams 1 HD enhanced frame every interval seconds while session is active."""
+        """Streams 1 HD frame strictly every interval seconds while session is active."""
         print(f"[EDGE STREAM] 🚀 Stream loop active for '{self.device_name}'. Capturing 1 HD frame every {self.interval}s...")
         try:
             while self.session_active and self.is_running:
-                start_time = time.time()
-                
                 loop = asyncio.get_running_loop()
                 frame_data = await loop.run_in_executor(None, self.capture_frame_base64)
                 
@@ -178,11 +165,10 @@ class RaspberryPiEdgeClient:
                         "image": frame_data
                     })
                     await self.ws.send(payload)
-                    print(f"[{timestamp}] 📸 Transmitted Full HD Enhanced Frame ({self.device_name}) -> Server (Next in {self.interval}s)")
+                    print(f"[{timestamp}] 📸 Transmitted Full HD Frame ({self.device_name}) -> Server (Next frame in {self.interval}s)")
 
-                elapsed = time.time() - start_time
-                sleep_time = max(0.5, self.interval - elapsed)
-                await asyncio.sleep(sleep_time)
+                # Strict delay between captures
+                await asyncio.sleep(self.interval)
 
         except asyncio.CancelledError:
             print("[EDGE STREAM] Stream loop halted.")
@@ -241,7 +227,7 @@ class RaspberryPiEdgeClient:
         print(f"   Resolution  : {self.width}x{self.height} (HD / 95% JPEG Quality)")
         print(f"   Illumination: Adaptive CLAHE + Dynamic Gamma Contrast Booster ON")
         print(f"   Target Server: {self.server_url}")
-        print(f"   Interval    : {self.interval}s (Raw Frame Throttle)")
+        print(f"   Interval    : {self.interval}s (1 frame every 15s)")
         print("="*70)
 
         headers = {}
