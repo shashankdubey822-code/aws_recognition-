@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Nexus.AI — Headless Raspberry Pi Camera Edge Daemon
-=====================================================
+Nexus.AI — Headless Raspberry Pi Camera Edge Daemon (Multi-Classroom Edition)
+=============================================================================
 Automated, bandwidth-efficient camera client for Raspberry Pi / Edge hardware.
 Connects via WebSocket to the central attendance server.
 - Stands by in low-power mode with camera OFF.
 - Automatically wakes up camera when Teacher clicks 'Start Monitoring'.
-- Captures and transmits 1 frame every 30 seconds (configurable rate-limiting).
+- Captures and transmits full raw uncropped frames every N seconds.
+- Reports device name, classroom ID, and local IP metadata.
 - Releases camera when monitoring concludes or teacher stops.
 """
 
@@ -16,6 +17,7 @@ import json
 import base64
 import asyncio
 import argparse
+import socket
 import websockets
 import cv2
 
@@ -23,13 +25,27 @@ DEFAULT_SERVER_WS = "ws://localhost:7860/ws"
 DEFAULT_INTERVAL_SEC = 30.0
 DEFAULT_CAMERA_INDEX = 0
 
+def get_local_ip():
+    """Gets the local network IP address of the device."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
 class RaspberryPiEdgeClient:
-    def __init__(self, server_url: str, interval: float = 30.0, camera_index: int = 0, width: int = 640, height: int = 480):
+    def __init__(self, server_url: str, device_name: str, device_id: str, interval: float = 30.0, camera_index: int = 0, width: int = 640, height: int = 480):
         self.server_url = server_url
+        self.device_name = device_name
+        self.device_id = device_id
         self.interval = interval
         self.camera_index = camera_index
         self.width = width
         self.height = height
+        self.local_ip = get_local_ip()
         
         self.is_running = True
         self.session_active = False
@@ -67,7 +83,7 @@ class RaspberryPiEdgeClient:
             print("🛑 Camera released. Device in low-power STANDBY mode.")
 
     def capture_frame_base64(self) -> str | None:
-        """Captures a single frame and encodes it to base64 JPEG string."""
+        """Captures a single raw uncropped frame and encodes it to base64 JPEG string."""
         if not self.cap or not self.cap.isOpened():
             if not self.open_camera():
                 return None
@@ -78,8 +94,8 @@ class RaspberryPiEdgeClient:
             print("⚠️ Failed to grab frame from camera.")
             return None
         
-        # Encode to JPEG
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
+        # Encode to high quality JPEG
+        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 85]
         success, buffer = cv2.imencode('.jpg', frame, encode_param)
         if not success:
             return None
@@ -89,20 +105,26 @@ class RaspberryPiEdgeClient:
 
     async def streaming_loop(self):
         """Streams 1 frame every interval seconds to the server while session is active."""
-        print(f"[EDGE STREAM] 🚀 Stream loop started. Capturing 1 frame every {self.interval}s...")
+        print(f"[EDGE STREAM] 🚀 Stream loop started for '{self.device_name}'. Capturing 1 raw frame every {self.interval}s...")
         try:
             while self.session_active and self.is_running:
                 start_time = time.time()
                 
-                # Capture frame in executor thread to prevent blocking asyncio loop
+                # Capture frame in executor thread
                 loop = asyncio.get_running_loop()
                 frame_data = await loop.run_in_executor(None, self.capture_frame_base64)
                 
                 if frame_data and self.ws:
                     timestamp = time.strftime("%H:%M:%S")
-                    payload = json.dumps({"type": "frame", "image": frame_data})
+                    payload = json.dumps({
+                        "type": "frame",
+                        "device_id": self.device_id,
+                        "device_name": self.device_name,
+                        "ip": self.local_ip,
+                        "image": frame_data
+                    })
                     await self.ws.send(payload)
-                    print(f"[{timestamp}] 📸 Transmitted frame to AWS AI Subsystem (Next frame in {self.interval}s)")
+                    print(f"[{timestamp}] 📸 Transmitted RAW uncropped frame ({self.device_name}) -> Server (Next frame in {self.interval}s)")
 
                 # Sleep remaining time
                 elapsed = time.time() - start_time
@@ -127,7 +149,7 @@ class RaspberryPiEdgeClient:
                     
                     if active and not self.session_active:
                         self.session_active = True
-                        print(f"\n[EDGE TRIGGER] ▶️ START COMMAND RECEIVED (Duration: {duration} mins)")
+                        print(f"\n[EDGE TRIGGER] ▶️ START MONITORING COMMAND RECEIVED (Duration: {duration} mins)")
                         self.open_camera()
                         if self.capture_task and not self.capture_task.done():
                             self.capture_task.cancel()
@@ -159,11 +181,13 @@ class RaspberryPiEdgeClient:
 
     async def run(self):
         """Main lifecycle loop with auto-reconnect."""
-        print("="*60)
+        print("="*65)
         print("   NEXUS AI — RASPBERRY PI EDGE CAMERA DAEMON")
+        print(f"   Device Name : {self.device_name} (ID: {self.device_id})")
+        print(f"   Local IP    : {self.local_ip}")
         print(f"   Target Server: {self.server_url}")
-        print(f"   Frame Interval: {self.interval}s (AWS Rate Limiting Bucket)")
-        print("="*60)
+        print(f"   Interval    : {self.interval}s (Raw Frame Throttle)")
+        print("="*65)
 
         reconnect_delay = 2
         while self.is_running:
@@ -174,10 +198,12 @@ class RaspberryPiEdgeClient:
                     reconnect_delay = 2
                     print("✅ Connected to central server. Registering edge device...")
                     
-                    # Register device
+                    # Register device with custom metadata
                     await websocket.send(json.dumps({
                         "type": "edge_register",
-                        "device": "RaspberryPi_Classroom_Camera"
+                        "device": self.device_name,
+                        "device_id": self.device_id,
+                        "ip": self.local_ip
                     }))
 
                     # Request session status
@@ -202,15 +228,21 @@ class RaspberryPiEdgeClient:
 def main():
     parser = argparse.ArgumentParser(description="Nexus AI Raspberry Pi Edge Camera Daemon")
     parser.add_argument("--url", default=DEFAULT_SERVER_WS, help=f"WebSocket server URL (default: {DEFAULT_SERVER_WS})")
+    parser.add_argument("--device", default="Raspberry Pi Classroom 01", help="Device name / Classroom Label (default: 'Raspberry Pi Classroom 01')")
+    parser.add_argument("--id", default=None, help="Unique Device ID (default: auto-generated from device name)")
     parser.add_argument("--interval", type=float, default=DEFAULT_INTERVAL_SEC, help=f"Frame interval in seconds (default: {DEFAULT_INTERVAL_SEC}s)")
     parser.add_argument("--camera", type=int, default=DEFAULT_CAMERA_INDEX, help=f"Camera index (default: {DEFAULT_CAMERA_INDEX})")
     parser.add_argument("--width", type=int, default=640, help="Camera width (default: 640)")
     parser.add_argument("--height", type=int, default=480, help="Camera height (default: 480)")
     
     args = parser.parse_args()
+    
+    device_id = args.id or f"rpi_{args.device.replace(' ', '_').lower()}"
 
     client = RaspberryPiEdgeClient(
         server_url=args.url,
+        device_name=args.device,
+        device_id=device_id,
         interval=args.interval,
         camera_index=args.camera,
         width=args.width,

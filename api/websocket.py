@@ -1,18 +1,20 @@
 import json
 import os
 import time
+import base64
 import asyncio
 from datetime import datetime
 from fastapi import WebSocket, WebSocketDisconnect
 
 os.makedirs("static/intruders", exist_ok=True)
 os.makedirs("static/attendees", exist_ok=True)
+os.makedirs("static/raw_frames", exist_ok=True)
 
 from services.liveness_engine import warmup
 from services.email_service import send_session_email_report
 from api.controllers.registration_controller import RegistrationController
 from api.controllers.tracking_controller import TrackingController
-from core.state import active_session, last_seen, PRESENT_IDENTITIES
+from core.state import active_session, last_seen, PRESENT_IDENTITIES, connected_devices
 
 # Pre-warm MiniFASNet model into RAM on startup
 try:
@@ -61,6 +63,11 @@ async def end_active_session(reason: str = "Manual Stop"):
     total_present = len(active_session.get("attendees", []))
     session_id = active_session.get("id", "SESSION")
     
+    # Mark active devices as standby
+    for dev_id in connected_devices:
+        if connected_devices[dev_id]["status"] == "active":
+            connected_devices[dev_id]["status"] = "standby"
+    
     print(f"[SESSION] 🛑 Concluding session {session_id}. Total attendees: {total_present}. Reason: {reason}")
     
     # Broadcast session stopped to UI and Raspberry Pi
@@ -71,16 +78,53 @@ async def end_active_session(reason: str = "Manual Stop"):
         "reason": reason
     })
 
+    # Broadcast updated devices list
+    await broadcast_json({
+        "type": "devices_update",
+        "devices": list(connected_devices.values())
+    })
+
     # Trigger Async Email Report Dispatch
     session_snapshot = dict(active_session)
     session_snapshot["attendees"] = list(active_session["attendees"])
     
     asyncio.create_task(asyncio.to_thread(send_session_email_report, session_snapshot))
 
+def save_raw_frame(device_id: str, image_bytes: bytes) -> str:
+    """Saves raw uncropped frame to disk and returns web URL."""
+    try:
+        clean_dev = "".join(c for c in device_id if c.isalnum() or c in ('_', '-'))
+        dev_dir = os.path.join("static/raw_frames", clean_dev)
+        os.makedirs(dev_dir, exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
+        filename = f"raw_{timestamp}.jpg"
+        filepath = os.path.join(dev_dir, filename)
+        
+        with open(filepath, "wb") as f:
+            f.write(image_bytes)
+            
+        return f"/static/raw_frames/{clean_dev}/{filename}"
+    except Exception as e:
+        print(f"⚠️ Failed to save raw frame: {e}")
+        return ""
+
 async def websocket_endpoint(websocket: WebSocket):
     global session_timer_task
     await websocket.accept()
     active_connections.add(websocket)
+    
+    # Extract Client IP
+    forwarded_for = websocket.headers.get("x-forwarded-for")
+    if forwarded_for:
+        client_ip = forwarded_for.split(",")[0].strip()
+    elif websocket.client:
+        client_ip = websocket.client.host
+    else:
+        client_ip = "Unknown IP"
+
+    # Default device identity for this connection
+    assigned_device_id = "web_browser_client"
     
     registration_controller = RegistrationController(websocket)
     tracking_controller = TrackingController(websocket)
@@ -102,6 +146,12 @@ async def websocket_endpoint(websocket: WebSocket):
             "type": "session_status",
             "active": False
         })
+    
+    # Send initial devices list
+    await websocket.send_json({
+        "type": "devices_update",
+        "devices": list(connected_devices.values())
+    })
     
     try:
         while True:
@@ -126,6 +176,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     active_session["end_time"] = None
                     active_session["attendees"] = []
                     
+                    # Mark connected devices as active
+                    for dev_id in connected_devices:
+                        if connected_devices[dev_id]["status"] != "disconnected":
+                            connected_devices[dev_id]["status"] = "active"
+                    
                     # Cancel any existing timer
                     if session_timer_task and not session_timer_task.done():
                         session_timer_task.cancel()
@@ -133,7 +188,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Schedule auto-stop timer
                     session_timer_task = asyncio.create_task(auto_stop_session_timer(duration * 60))
                     
-                    print(f"[SESSION] ▶️ Started fresh session {session_id} for {duration} minutes (Attendees reset to 0).")
+                    print(f"[SESSION] ▶️ Started fresh session {session_id} for {duration} minutes.")
                     
                     # Notify all clients (UI + Raspberry Pi)
                     await broadcast_json({
@@ -142,6 +197,11 @@ async def websocket_endpoint(websocket: WebSocket):
                         "duration_minutes": duration,
                         "start_time": active_session["start_time"],
                         "reset_attendance": True
+                    })
+                    
+                    await broadcast_json({
+                        "type": "devices_update",
+                        "devices": list(connected_devices.values())
                     })
                     continue
 
@@ -168,7 +228,103 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     continue
 
-                # --- 2. Registration Messages ---
+                # --- 2. Edge Device Registration (Multi-Classroom Support) ---
+                if p_type == "edge_register":
+                    device_name = payload.get("device", "Raspberry Pi Edge")
+                    dev_id = payload.get("device_id") or f"rpi_{device_name.replace(' ', '_').lower()}"
+                    assigned_device_id = dev_id
+                    
+                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    if dev_id not in connected_devices:
+                        connected_devices[dev_id] = {
+                            "device_id": dev_id,
+                            "device_name": device_name,
+                            "client_ip": client_ip,
+                            "status": "active" if active_session.get("active") else "standby",
+                            "first_seen": now_str,
+                            "last_seen": now_str,
+                            "total_frames": 0,
+                            "raw_frames": []
+                        }
+                    else:
+                        connected_devices[dev_id]["device_name"] = device_name
+                        connected_devices[dev_id]["client_ip"] = client_ip
+                        connected_devices[dev_id]["status"] = "active" if active_session.get("active") else "standby"
+                        connected_devices[dev_id]["last_seen"] = now_str
+
+                    print(f"[EDGE] 📡 Registered: {device_name} (ID: {dev_id}, IP: {client_ip})")
+                    
+                    await websocket.send_json({
+                        "type": "edge_ack",
+                        "session_active": active_session.get("active", False),
+                        "duration_minutes": active_session.get("duration_minutes", 50)
+                    })
+                    
+                    await broadcast_json({
+                        "type": "devices_update",
+                        "devices": list(connected_devices.values())
+                    })
+                    continue
+
+                # --- 3. Live Tracking Frame (With Raw Frame Capture) ---
+                if p_type == "frame":
+                    dev_id = payload.get("device_id") or assigned_device_id
+                    dev_name = payload.get("device_name") or (connected_devices.get(dev_id, {}).get("device_name", "Edge Camera"))
+                    
+                    # Update device telemetry
+                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    if dev_id not in connected_devices:
+                        connected_devices[dev_id] = {
+                            "device_id": dev_id,
+                            "device_name": dev_name,
+                            "client_ip": client_ip,
+                            "status": "active",
+                            "first_seen": now_str,
+                            "last_seen": now_str,
+                            "total_frames": 0,
+                            "raw_frames": []
+                        }
+                    else:
+                        connected_devices[dev_id]["last_seen"] = now_str
+                        connected_devices[dev_id]["status"] = "active"
+                    
+                    connected_devices[dev_id]["total_frames"] += 1
+                    
+                    # Save raw uncropped frame
+                    try:
+                        encoded_data = payload["image"].split(',')[1]
+                        raw_bytes = base64.b64decode(encoded_data)
+                        raw_url = save_raw_frame(dev_id, raw_bytes)
+                        
+                        if raw_url:
+                            frame_entry = {
+                                "timestamp": datetime.now().strftime("%H:%M:%S"),
+                                "date": datetime.now().strftime("%Y-%m-%d"),
+                                "url": raw_url,
+                                "device_id": dev_id,
+                                "device_name": dev_name,
+                                "ip": client_ip
+                            }
+                            connected_devices[dev_id]["raw_frames"].insert(0, frame_entry)
+                            # Keep latest 30 frames in rolling memory per device
+                            if len(connected_devices[dev_id]["raw_frames"]) > 30:
+                                connected_devices[dev_id]["raw_frames"].pop()
+                                
+                            # Broadcast new raw frame event to dashboard
+                            await broadcast_json({
+                                "type": "new_raw_frame",
+                                "device_id": dev_id,
+                                "frame": frame_entry
+                            })
+                    except Exception as fe:
+                        print(f"⚠️ Raw frame extraction error: {fe}")
+
+                    # Continue standard tracking & face detection pipeline
+                    await tracking_controller.process_frame(payload)
+                    continue
+
+                # --- 4. Registration Messages ---
                 if p_type == "start_registration":
                     registration_controller.start_registration(payload)
                     continue
@@ -177,19 +333,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     await registration_controller.process_frame(payload)
                     continue
 
-                # --- 3. Live Tracking Frame ---
-                if p_type == "frame":
-                    await tracking_controller.process_frame(payload)
-                    continue
-
-                # --- 4. Edge Device Register ---
-                if p_type == "edge_register":
-                    device_name = payload.get("device", "RaspberryPi")
-                    print(f"[EDGE] 📡 Edge device connected: {device_name}")
+                # --- 5. Query Devices List ---
+                if p_type == "get_devices":
                     await websocket.send_json({
-                        "type": "edge_ack",
-                        "session_active": active_session.get("active", False),
-                        "duration_minutes": active_session.get("duration_minutes", 50)
+                        "type": "devices_update",
+                        "devices": list(connected_devices.values())
                     })
                     continue
 
@@ -212,3 +360,9 @@ async def websocket_endpoint(websocket: WebSocket):
         print(f"WS Fatal Error: {e}")
     finally:
         active_connections.discard(websocket)
+        if assigned_device_id in connected_devices:
+            connected_devices[assigned_device_id]["status"] = "standby"
+            asyncio.create_task(broadcast_json({
+                "type": "devices_update",
+                "devices": list(connected_devices.values())
+            }))

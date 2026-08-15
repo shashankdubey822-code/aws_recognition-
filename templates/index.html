@@ -160,6 +160,31 @@
         </div>
     </div>
 
+    <!-- RAW IMAGE FULLSCREEN LIGHTBOX MODAL -->
+    <div id="raw-lightbox" class="fixed inset-0 z-[3000] hidden flex items-center justify-center bg-black/90 backdrop-blur-md p-4 transition-all duration-300">
+        <div class="glass-panel glass-border-gradient rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl relative">
+            <div class="p-4 border-b border-white/10 flex justify-between items-center bg-black/40">
+                <div class="flex items-center gap-3">
+                    <span class="w-3 h-3 rounded-full bg-brand-cyan animate-pulse"></span>
+                    <div>
+                        <h3 id="lightbox-device-title" class="font-bold text-white font-mono text-sm">Raspberry Pi Raw Frame</h3>
+                        <p id="lightbox-meta-subtitle" class="text-xs text-slate-400 font-mono">Captured: 12:00:00 | IP: 127.0.0.1</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <a id="lightbox-download-link" href="#" download="raw_frame.jpg" class="bg-brand-cyan/20 hover:bg-brand-cyan/30 text-brand-cyan border border-brand-cyan/40 px-3 py-1.5 rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 transition-all">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                        Download High-Res
+                    </a>
+                    <button id="lightbox-close-btn" class="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 text-xl font-bold font-mono transition-all">&times;</button>
+                </div>
+            </div>
+            <div class="flex-1 bg-black/80 p-4 flex items-center justify-center overflow-auto">
+                <img id="lightbox-img" src="" alt="Raw Captured Frame" class="max-w-full max-h-[70vh] object-contain rounded-lg border border-white/10 shadow-2xl">
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notifications Container -->
     <div id="toast-container"></div>
 
@@ -174,11 +199,22 @@
                 <p class="text-[10px] uppercase tracking-[0.2em] text-brand-emerald font-mono">Teacher Surveillance Hub</p>
             </div>
         </div>
+
+        <!-- Center Tabs Selector -->
+        <div class="flex items-center bg-black/60 p-1 rounded-xl border border-white/10">
+            <button id="tab-surveillance-btn" class="px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/40 shadow-[0_0_10px_rgba(0,210,255,0.2)]">
+                🖥️ AI Surveillance & HUD
+            </button>
+            <button id="tab-devices-btn" class="px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5">
+                <span>📡 Currently Running</span>
+                <span id="active-devices-badge" class="bg-brand-emerald/20 text-brand-emerald px-1.5 py-0.2 rounded text-[10px] font-bold border border-brand-emerald/40">1</span>
+            </button>
+        </div>
         
         <div class="flex flex-wrap items-center gap-3">
             <!-- Camera Selection Dropdown -->
             <select id="camera-select" class="bg-black/60 text-brand-cyan border border-brand-cyan/40 px-3 py-2 rounded-lg text-xs font-mono font-bold focus:outline-none focus:border-brand-cyan shadow-[0_0_10px_rgba(0,210,255,0.1)] cursor-pointer">
-                <option value="">📷 SELECT CAMERA...</option>
+                <option value="">📷 SELECT LOCAL CAMERA...</option>
             </select>
 
             <!-- WebSocket Status -->
@@ -264,18 +300,11 @@
                 <span class="text-[10px] text-brand-cyan uppercase font-mono tracking-widest">Time Remaining:</span>
                 <span id="session-timer-display" class="text-base font-mono font-black text-white tracking-widest">50:00</span>
             </div>
-
-            <!-- Raspberry Pi Edge Daemon Badge -->
-            <div class="flex items-center gap-2 bg-black/60 px-3 py-1.5 rounded-lg border border-white/10" title="Headless Raspberry Pi camera status">
-                <svg class="w-3.5 h-3.5 text-brand-emerald" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
-                <span class="text-[11px] font-mono text-slate-400">Pi Daemon:</span>
-                <span id="edge-status-badge" class="text-[11px] font-mono text-brand-cyan font-bold">READY (30s Bucket)</span>
-            </div>
         </div>
     </div>
 
-    <!-- Main Content Grid -->
-    <main class="flex-1 p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1600px] mx-auto w-full">
+    <!-- VIEW 1: SURVEILLANCE & AI HUD -->
+    <div id="view-surveillance" class="flex-1 p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1600px] mx-auto w-full">
         
         <!-- Left Sidebar: Terminal & Debug -->
         <div class="lg:col-span-3 flex flex-col gap-6">
@@ -313,7 +342,7 @@
                     Audit Event Log
                 </h3>
                 <div id="terminal-logs" class="bg-black/60 flex-1 rounded-lg border border-white/10 p-3 font-mono text-xs overflow-y-auto flex flex-col gap-1 tracking-wider shadow-inner">
-                    <div class="text-brand-cyan/70">NEXUS OS v3.1 Ready — Session Controller Active</div>
+                    <div class="text-brand-cyan/70">NEXUS OS v3.2 Ready — Multi-Device Telemetry Active</div>
                 </div>
             </div>
         </div>
@@ -369,7 +398,111 @@
                 </div>
             </div>
         </div>
-    </main>
+    </div>
+
+    <!-- VIEW 2: CURRENTLY RUNNING DEVICES & RAW FRAMES GALLERY (NEW FEATURE) -->
+    <div id="view-devices" class="hidden flex-1 p-6 flex flex-col gap-6 max-w-[1600px] mx-auto w-full animate-slideIn">
+        
+        <!-- Summary Stats Banner -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="glass-panel glass-border-gradient rounded-xl p-4 flex items-center justify-between">
+                <div>
+                    <div class="text-xs font-mono text-slate-400 uppercase">Total Edge Devices</div>
+                    <div class="text-2xl font-bold font-mono text-white" id="stat-total-devices">0</div>
+                </div>
+                <div class="p-3 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
+                </div>
+            </div>
+            
+            <div class="glass-panel glass-border-gradient rounded-xl p-4 flex items-center justify-between">
+                <div>
+                    <div class="text-xs font-mono text-slate-400 uppercase">Active Streaming</div>
+                    <div class="text-2xl font-bold font-mono text-brand-emerald" id="stat-active-devices">0</div>
+                </div>
+                <div class="p-3 rounded-lg bg-brand-emerald/10 text-brand-emerald border border-brand-emerald/20">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                </div>
+            </div>
+
+            <div class="glass-panel glass-border-gradient rounded-xl p-4 flex items-center justify-between">
+                <div>
+                    <div class="text-xs font-mono text-slate-400 uppercase">Standby / Stopped</div>
+                    <div class="text-2xl font-bold font-mono text-slate-400" id="stat-standby-devices">0</div>
+                </div>
+                <div class="p-3 rounded-lg bg-slate-500/10 text-slate-400 border border-slate-500/20">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                </div>
+            </div>
+
+            <div class="glass-panel glass-border-gradient rounded-xl p-4 flex items-center justify-between">
+                <div>
+                    <div class="text-xs font-mono text-slate-400 uppercase">Total Raw Frames Ingested</div>
+                    <div class="text-2xl font-bold font-mono text-brand-cyan" id="stat-total-frames">0</div>
+                </div>
+                <div class="p-3 rounded-lg bg-brand-cyan/10 text-brand-cyan border border-brand-cyan/20">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Devices & Feeds Workspace -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
+            
+            <!-- Left Side: Devices List -->
+            <div class="lg:col-span-5 flex flex-col gap-4">
+                <div class="glass-panel glass-border-gradient rounded-xl p-4 flex justify-between items-center">
+                    <h3 class="font-bold text-white font-mono text-sm flex items-center gap-2">
+                        <svg class="w-4 h-4 text-brand-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                        Connected Edge Nodes
+                    </h3>
+                    <!-- Filter Buttons -->
+                    <div class="flex items-center gap-1 bg-black/50 p-1 rounded-lg border border-white/10 text-[11px] font-mono">
+                        <button id="filter-all-devices-btn" class="px-2 py-0.5 rounded bg-brand-cyan/20 text-brand-cyan font-bold">ALL</button>
+                        <button id="filter-active-devices-btn" class="px-2 py-0.5 rounded text-slate-400 hover:text-white">ACTIVE</button>
+                        <button id="filter-stopped-devices-btn" class="px-2 py-0.5 rounded text-slate-400 hover:text-white">STOPPED</button>
+                    </div>
+                </div>
+
+                <!-- Scrollable Device Cards Container -->
+                <div id="devices-cards-list" class="flex flex-col gap-3 overflow-y-auto max-h-[600px] pr-1">
+                    <!-- Populated dynamically via JS -->
+                </div>
+            </div>
+
+            <!-- Right Side: Device Detail & Raw Image Gallery -->
+            <div class="lg:col-span-7 flex flex-col gap-4">
+                <div class="glass-panel glass-border-gradient rounded-xl p-5 flex-1 flex flex-col min-h-[500px]">
+                    <!-- Selected Device Header -->
+                    <div class="border-b border-white/10 pb-4 mb-4 flex flex-wrap justify-between items-center gap-3" id="selected-device-header">
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span class="w-3 h-3 rounded-full bg-brand-emerald" id="selected-device-indicator"></span>
+                                <h3 class="text-base font-bold text-white font-mono" id="selected-device-name">Select a Device</h3>
+                            </div>
+                            <p class="text-xs text-slate-400 font-mono mt-1" id="selected-device-submeta">IP: -- | First Seen: -- | Total Frames: --</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-mono text-brand-cyan bg-brand-cyan/10 px-3 py-1 rounded-lg border border-brand-cyan/30" id="selected-device-status-badge">STANDBY</span>
+                        </div>
+                    </div>
+
+                    <!-- Raw Frames Gallery Title -->
+                    <div class="flex justify-between items-center mb-3">
+                        <span class="text-xs font-mono uppercase text-slate-400 tracking-wider">Uncropped Raw Captured Frames (Click to Inspect)</span>
+                        <span class="text-xs font-mono text-slate-500" id="raw-frames-count-label">0 Frames</span>
+                    </div>
+
+                    <!-- Raw Frames Grid -->
+                    <div id="raw-frames-gallery" class="flex-1 grid grid-cols-2 sm:grid-cols-3 gap-3 overflow-y-auto max-h-[460px] p-2 bg-black/40 rounded-xl border border-white/5">
+                        <div class="col-span-full text-center text-slate-500 py-16 font-mono text-xs">
+                            📷 No raw frames captured yet for this device. Start monitoring or connect a camera stream.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Student Registration Modal -->
     <div id="modal-backdrop" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center z-50 transition-all duration-300">

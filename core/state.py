@@ -1,14 +1,18 @@
 import sqlite3
 import os
 import time
+from datetime import datetime
 
 DB_PATH = "faces_db/system.db"
+RAW_FRAMES_DIR = "static/raw_frames"
 
 def init_db():
     os.makedirs("faces_db", exist_ok=True)
     os.makedirs("reports", exist_ok=True)
     os.makedirs("static/intruders", exist_ok=True)
     os.makedirs("static/attendees", exist_ok=True)
+    os.makedirs(RAW_FRAMES_DIR, exist_ok=True)
+    
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     # Table for persistent attendance logs with Roll Number and Session ID
@@ -36,8 +40,20 @@ active_session = {
     "attendees": [] # [{ "roll_number": "...", "name": "...", "time": "...", "photo": "..." }]
 }
 
-# Connected Edge Devices (e.g. Raspberry Pi)
-connected_edge_clients = set()
+# Connected & Historical Devices Registry (Supports 30+ Classrooms / Edge Pis)
+# device_id -> { "device_id", "device_name", "client_ip", "status", "first_seen", "last_seen", "total_frames", "raw_frames": [...] }
+connected_devices = {
+    "local_web_browser": {
+        "device_id": "local_web_browser",
+        "device_name": "Web Browser Host (Local/Remote)",
+        "client_ip": "127.0.0.1",
+        "status": "standby",
+        "first_seen": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "last_seen": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "total_frames": 0,
+        "raw_frames": []
+    }
+}
 
 # Consensus & Tracking
 consensus_votes = {} # { "FaceID": ["Name", "Name", "Name"] }
