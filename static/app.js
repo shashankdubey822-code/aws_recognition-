@@ -105,7 +105,6 @@ let regProgress = 0;
 // --- ADVANCED TRACKING STATE ---
 let trackedFaces = {}; 
 const LERP_FACTOR = 0.3; 
-const BOX_FADEOUT_MS = 2000; 
 
 // --- TOAST NOTIFICATIONS ---
 function showToast(message, type = 'info') {
@@ -320,7 +319,7 @@ function renderSelectedDeviceDetails() {
             selectedDeviceStatusBadge.textContent = '🔄 CONTACTING AWS REKOGNITION...';
             selectedDeviceStatusBadge.className = 'text-xs font-mono text-cyan-400 bg-cyan-500/10 px-3 py-1 rounded-lg border border-cyan-500/30 animate-pulse';
         } else {
-            selectedDeviceStatusBadge.textContent = dev.status === 'active' ? 'STREAMING ACTIVE (15s CYCLE)' : 'STANDBY / IDLE';
+            selectedDeviceStatusBadge.textContent = dev.status === 'active' ? 'STREAMING ACTIVE' : 'STANDBY / IDLE';
             selectedDeviceStatusBadge.className = dev.status === 'active' 
                 ? 'text-xs font-mono text-brand-emerald bg-brand-emerald/10 px-3 py-1 rounded-lg border border-brand-emerald/30'
                 : 'text-xs font-mono text-slate-400 bg-slate-800 px-3 py-1 rounded-lg border border-slate-700';
@@ -685,69 +684,6 @@ if (clearCacheBtn) {
     });
 }
 
-// --- DRAWING CORNERS ON CANVAS ---
-function drawHighTechCorners(x, y, w, h, color, size = 15) {
-    overlayCtx.strokeStyle = color;
-    overlayCtx.lineWidth = 2.5;
-    overlayCtx.beginPath();
-    overlayCtx.moveTo(x, y + size); overlayCtx.lineTo(x, y); overlayCtx.lineTo(x + size, y);
-    overlayCtx.moveTo(x + w - size, y); overlayCtx.lineTo(x + w, y); overlayCtx.lineTo(x + w, y + size);
-    overlayCtx.moveTo(x, y + h - size); overlayCtx.lineTo(x, y); overlayCtx.lineTo(x + size, y + h);
-    overlayCtx.moveTo(x + w - size, y + h); overlayCtx.lineTo(x + w, y + h); overlayCtx.lineTo(x + w, y + h - size);
-    overlayCtx.stroke();
-}
-
-function drawSmoothFaces() {
-    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-    const now = Date.now();
-
-    for (const id in trackedFaces) {
-        const obj = trackedFaces[id];
-        
-        obj.currBox.x += (obj.targetBox.x - obj.currBox.x) * LERP_FACTOR;
-        obj.currBox.y += (obj.targetBox.y - obj.currBox.y) * LERP_FACTOR;
-        obj.currBox.w += (obj.targetBox.w - obj.currBox.w) * LERP_FACTOR;
-        obj.currBox.h += (obj.targetBox.h - obj.currBox.h) * LERP_FACTOR;
-
-        const { x, y, w, h } = obj.currBox;
-        
-        let color = obj.status === 'match' ? '#10b981' : (obj.status === 'spoof' ? '#ef4444' : '#00d2ff');
-        let label = obj.name;
-
-        drawHighTechCorners(x, y, w, h, color);
-
-        overlayCtx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-        overlayCtx.fillRect(x, Math.max(0, y - 28), Math.max(140, w), 24);
-        
-        overlayCtx.fillStyle = color;
-        overlayCtx.font = 'bold 12px Orbitron, monospace';
-        overlayCtx.fillText(label, x + 6, Math.max(16, y - 12));
-    }
-}
-
-function updateDebugCrops(faces) {
-    if (!debugCrops) return;
-    debugCrops.innerHTML = '';
-    if (cropCount) cropCount.textContent = faces.length;
-
-    if (faces.length === 0) {
-        debugCrops.innerHTML = '<div class="text-xs text-slate-600 italic font-mono">Awaiting face...</div>';
-        return;
-    }
-
-    faces.forEach(face => {
-        if (face.crop) {
-            const container = document.createElement('div');
-            container.className = 'relative w-14 h-14 rounded-lg overflow-hidden border border-white/20 bg-black';
-            const img = document.createElement('img');
-            img.src = face.crop;
-            img.className = 'w-full h-full object-cover';
-            container.appendChild(img);
-            debugCrops.appendChild(container);
-        }
-    });
-}
-
 // --- WEBSOCKET CONNECTION ---
 function connectWebSocket() {
     ws = new WebSocket(wsUrl);
@@ -930,24 +866,6 @@ function connectWebSocket() {
         // --- FRAME RESULTS (IN DEMO MODE) ---
         if (data.type === 'ready') {
             isProcessing = false;
-            if (data.faces && data.faces.length > 0) {
-                const now = Date.now();
-                data.faces.forEach(f => {
-                    trackedFaces[f.id] = {
-                        id: f.id,
-                        name: f.name,
-                        roll_number: f.roll_number || 'N/A',
-                        status: f.status,
-                        currBox: { ...f.box },
-                        targetBox: { ...f.box },
-                        lastSeen: now
-                    };
-                });
-                if (isDemoRunning) updateDebugCrops(data.faces);
-            } else {
-                trackedFaces = {};
-                if (isDemoRunning) updateDebugCrops([]);
-            }
         }
     };
 
@@ -1048,7 +966,6 @@ if (cameraSelect) {
     });
 }
 
-// --- DEMO & SCAN RENDER LOOP ---
 function renderLoop() {
     if (!isDemoRunning && !isRegistering) return;
 
@@ -1076,8 +993,6 @@ function renderLoop() {
             }));
         }
     }
-
-    if (isDemoRunning) drawSmoothFaces();
 
     requestAnimationFrame(renderLoop);
 }

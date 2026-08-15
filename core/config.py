@@ -10,16 +10,16 @@ AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 COLLECTION_ID = os.getenv("AWS_COLLECTION_ID", "hackathon_attendance")
 
 # --- Thresholds & Security ---
-MATCH_THRESHOLD = 98.0  # Increased for Enterprise Security (prevents false positives)
-MIN_FACE_AREA = 0.03    # Ignore faces smaller than 3% of the screen (posters, backgrounds)
+MATCH_THRESHOLD = 95.0  # High accuracy threshold
+MIN_FACE_AREA = 0.005   # Detects faces even from distance in classroom (0.5% of frame)
 
 # --- App & Session Config ---
 LOG_FILE = "attendance_log.csv"
 REPORTS_DIR = "reports"
 LIVE_PRESENCE_TIMEOUT = 5 # Seconds
-COOL_DOWN_SEC = 300 # 5 minutes cooldown
+COOL_DOWN_SEC = 60 # 1 minute cooldown per session
 DEFAULT_SESSION_DURATION_MIN = 50 # Default monitoring duration: 50 mins
-FRAME_RATE_LIMIT_SEC = 30.0 # 30 seconds interval between frame processing/AWS pings
+FRAME_RATE_LIMIT_SEC = 15.0 # 15 seconds interval
 
 # --- Teacher Authentication ---
 TEACHER_EMAIL = os.getenv("TEACHER_EMAIL", "shashankdubey822@gmail.com")
@@ -30,6 +30,6 @@ SESSION_COOKIE_NAME = "nexus_teacher_session"
 # --- SMTP Email Configuration ---
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-SMTP_EMAIL = os.getenv("SMTP_EMAIL", "") # e.g. your_email@gmail.com (or App Password)
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "") # e.g. your 16-character Google App Password
+SMTP_EMAIL = os.getenv("SMTP_EMAIL", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 TEACHER_REPORT_EMAIL = os.getenv("TEACHER_REPORT_EMAIL", "shashankdubey822@gmail.com")

@@ -11,14 +11,13 @@ from services.attendance import mark_attendance, parse_identity
 from services.face_detector import detect_faces_crowd
 from services.liveness_engine import score_liveness
 from core.config import MIN_FACE_AREA
-from core.tracker import CentroidTracker
 from core.state import connected_devices
 
 class TrackingController:
     def __init__(self, websocket: WebSocket, broadcast_func=None):
         self.websocket = websocket
         self.broadcast_func = broadcast_func or websocket.send_json
-        self.tracker = CentroidTracker(max_disappeared=15, max_distance=0.15)
+        self.last_intruder_time = 0
 
     async def broadcast_event(self, event_dict: dict):
         """Dispatches telemetry event to ALL connected dashboard browsers."""
@@ -37,7 +36,7 @@ class TrackingController:
         dev_id = payload.get("device_id", "edge_device")
         dev_name = payload.get("device_name", "Edge Node")
 
-        # Broadcast Stage 1: Local AI Face Cropping
+        # 1. Broadcast Stage: Local AI Face Cropping Active
         await self.broadcast_event({
             "type": "device_stage_update",
             "device_id": dev_id,
@@ -45,7 +44,7 @@ class TrackingController:
             "message": "Local AI Model Extracting Faces..."
         })
 
-        # 1. Detect faces locally using Mediapipe crowd detector in thread pool
+        # 2. Detect and crop faces locally using Mediapipe crowd detector
         all_faces = await asyncio.to_thread(detect_faces_crowd, image_bytes)
         
         valid_faces = []
@@ -54,152 +53,99 @@ class TrackingController:
             if area >= MIN_FACE_AREA:
                 valid_faces.append(face)
 
-        # 2. Update Centroid Tracker
-        tracked_objects = self.tracker.update(valid_faces)
+        print(f"[EDGE AI] 🔍 Processed frame from {dev_name} ({dev_id}): Found {len(valid_faces)} valid faces (Total raw detections: {len(all_faces)})")
 
-        search_tasks = []
-        search_object_ids = []
+        if not valid_faces:
+            await self.broadcast_event({
+                "type": "device_stage_update",
+                "device_id": dev_id,
+                "stage": "IDLE",
+                "message": "Frame Processed (0 Faces in View)"
+            })
+            return
+
+        # 3. Create FIFO Cropped Queue Items
         queue_items = []
-
-        # 3. Liveness Analysis & Search Pipeline
-        for idx, (object_id, obj) in enumerate(tracked_objects.items()):
-            for vf in valid_faces:
-                if vf["box"]["x"] == obj["box"]["x"] and vf["box"]["y"] == obj["box"]["y"]:
-                    liveness_score, liveness_reason = score_liveness(
-                        obj["landmarks_history"],
-                        obj["brightness_history"],
-                        obj["blur_history"],
-                        fft_val=vf.get("fft_max_hf", 0.0)
-                    )
-                    obj["liveness_score"] = liveness_score
-
-                    if liveness_score < 0.40:
-                        obj["spoof_streak"] += 1
-                        if obj["spoof_streak"] >= 3:
-                            obj["liveness"] = "spoof"
-                    else:
-                        obj["spoof_streak"] = max(0, obj["spoof_streak"] - 1)
-                        if obj["spoof_streak"] == 0:
-                            obj["liveness"] = "real"
-                    break
-
-            # Intruder Capture
-            if obj["liveness"] == "real" and obj["aws_status"] == "unknown" and obj["frames_active"] > 30:
-                now = time.time()
-                if now - getattr(self, "last_intruder_time", 0) > 10:
-                    self.last_intruder_time = now
-                    for vf in valid_faces:
-                        timestamp = int(time.time())
-                        filepath = f"static/intruders/intruder_{timestamp}.jpg"
-                        try:
-                            with open(filepath, "wb") as f:
-                                f.write(vf["bytes"])
-                            await self.broadcast_event({
-                                "type": "intruder_alert",
-                                "message": "UNREGISTERED ENTITY DETECTED",
-                                "image": f"/static/intruders/intruder_{timestamp}.jpg"
-                            })
-                        except Exception as e:
-                            print(f"Failed to save intruder: {e}")
-                        break
-
-            # Liveness check before AWS
-            if obj["liveness"] == "spoof" and obj.get("challenge_state") not in ("active", "verified_real"):
-                obj["aws_status"] = "spoof"
-                obj["name"] = "SPOOF DETECTED"
-
-                for vf in valid_faces:
-                    if vf["box"]["x"] == obj["box"]["x"] and vf["box"]["y"] == obj["box"]["y"]:
-                        crop_b64 = "data:image/jpeg;base64," + base64.b64encode(vf["bytes"]).decode('utf-8')
-                        q_item = {
-                            "id": f"q_{int(time.time()*1000)}_{idx}",
-                            "time": datetime.now().strftime("%H:%M:%S"),
-                            "crop": crop_b64,
-                            "status": "spoof",
-                            "name": "SPOOF ATTACK",
-                            "roll_number": "N/A",
-                            "score": 0.0,
-                            "result": "🛑 LIVENESS FAILED — Anti-Spoof Shield Triggered"
-                        }
-                        queue_items.append(q_item)
-                        break
+        search_tasks = []
+        
+        for idx, vf in enumerate(valid_faces):
+            crop_b64 = "data:image/jpeg;base64," + base64.b64encode(vf["bytes"]).decode('utf-8')
+            q_id = f"q_{int(time.time()*1000)}_{idx}"
+            
+            # Check FFT anti-spoof
+            fft_val = vf.get("fft_max_hf", 0.0)
+            if fft_val > 240.0:
+                q_item = {
+                    "id": q_id,
+                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "crop": crop_b64,
+                    "status": "spoof",
+                    "name": "SPOOF DETECTED",
+                    "roll_number": "N/A",
+                    "score": 0.0,
+                    "result": "🛑 LIVENESS FAILED — Digital Screen / Moiré Detected"
+                }
+                queue_items.append(q_item)
                 continue
 
-            # If face is still scanning
-            if obj["aws_status"] == "unknown" and obj["aws_calls"] < 3 and obj["liveness"] == "real":
-                for vf in valid_faces:
-                    if vf["box"]["x"] == obj["box"]["x"] and vf["box"]["y"] == obj["box"]["y"]:
-                        search_tasks.append(asyncio.to_thread(search_face_on_aws, vf["bytes"]))
-                        search_object_ids.append(object_id)
-                        obj["aws_calls"] += 1
+            q_item = {
+                "id": q_id,
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "crop": crop_b64,
+                "status": "scanning",
+                "name": "Scanning Face...",
+                "roll_number": "...",
+                "score": 0.0,
+                "result": "🔄 Enqueued in FIFO Pipeline — Dispatched to AWS Rekognition..."
+            }
+            queue_items.append(q_item)
+            search_tasks.append((idx, q_item, vf["bytes"]))
 
-                        crop_b64 = "data:image/jpeg;base64," + base64.b64encode(vf["bytes"]).decode('utf-8')
-                        q_item = {
-                            "id": f"q_{int(time.time()*1000)}_{idx}",
-                            "time": datetime.now().strftime("%H:%M:%S"),
-                            "crop": crop_b64,
-                            "status": "scanning",
-                            "name": "Scanning...",
-                            "roll_number": "...",
-                            "score": 0.0,
-                            "result": "🔄 Enqueued in FIFO Pipeline — Dispatched to AWS..."
-                        }
-                        queue_items.append(q_item)
-                        break
-
-        # Broadcast Stage 2: AWS Rekognition Matching & Initial Enqueue
-        if queue_items:
-            if dev_id in connected_devices:
-                if "cropped_queue" not in connected_devices[dev_id]:
-                    connected_devices[dev_id]["cropped_queue"] = []
-                for qi in queue_items:
-                    connected_devices[dev_id]["cropped_queue"].insert(0, qi)
-                if len(connected_devices[dev_id]["cropped_queue"]) > 25:
-                    connected_devices[dev_id]["cropped_queue"] = connected_devices[dev_id]["cropped_queue"][:25]
+        # 4. Immediate broadcast of enqueued crops into the FIFO drawer
+        if dev_id in connected_devices:
+            if "cropped_queue" not in connected_devices[dev_id]:
+                connected_devices[dev_id]["cropped_queue"] = []
+            for qi in queue_items:
+                connected_devices[dev_id]["cropped_queue"].insert(0, qi)
+            if len(connected_devices[dev_id]["cropped_queue"]) > 30:
+                connected_devices[dev_id]["cropped_queue"] = connected_devices[dev_id]["cropped_queue"][:30]
 
             await self.broadcast_event({
                 "type": "device_stage_update",
                 "device_id": dev_id,
                 "stage": "AWS_MATCHING",
-                "message": f"Contacting AWS Cloud AI ({len(queue_items)} faces)..."
+                "message": f"Contacting AWS Cloud AI ({len(search_tasks)} faces)..."
             })
 
             await self.broadcast_event({
                 "type": "aws_queue_update",
                 "device_id": dev_id,
-                "queue": connected_devices.get(dev_id, {}).get("cropped_queue", queue_items)
+                "queue": connected_devices[dev_id]["cropped_queue"]
             })
 
-        # Run AWS calls in parallel threads
+        # 5. Run AWS Rekognition searches in parallel
         if search_tasks:
-            aws_results = await asyncio.gather(*search_tasks)
+            aws_futures = [asyncio.to_thread(search_face_on_aws, task[2]) for task in search_tasks]
+            aws_results = await asyncio.gather(*aws_futures)
+
             for i, face_report in enumerate(aws_results):
-                obj_id = search_object_ids[i]
+                idx, q_item, face_bytes = search_tasks[i]
+                
                 if face_report and len(face_report) > 0:
                     res = face_report[0]
                     if res["status"] == "match":
                         raw_id = res["name"]
                         display_name, roll_no = parse_identity(raw_id)
+                        confidence = round(res["score"], 1)
 
-                        self.tracker.objects[obj_id]["name"] = display_name
-                        self.tracker.objects[obj_id]["roll_number"] = roll_no
-                        self.tracker.objects[obj_id]["aws_status"] = "match"
-                        self.tracker.objects[obj_id]["score"] = res["score"]
+                        q_item["status"] = "match"
+                        q_item["name"] = display_name
+                        q_item["roll_number"] = roll_no
+                        q_item["score"] = confidence
+                        q_item["result"] = f"✅ AWS MATCH APPROVED: {display_name} (Roll: {roll_no}) [Confidence: {confidence}%]"
 
-                        matched_bytes = None
-                        for vf in valid_faces:
-                            if vf["box"]["x"] == self.tracker.objects[obj_id]["box"]["x"] and vf["box"]["y"] == self.tracker.objects[obj_id]["box"]["y"]:
-                                matched_bytes = vf["bytes"]
-                                break
-
-                        # Federated Learning update
-                        if res["score"] > 98.0 and not self.tracker.objects[obj_id].get("federated_updated") and matched_bytes:
-                            self.tracker.objects[obj_id]["federated_updated"] = True
-                            asyncio.create_task(asyncio.to_thread(register_face_to_aws, matched_bytes, raw_id))
-                            print(f"[FEDERATED LEARNING] Updated AWS neural profile for {display_name} (Score: {res['score']})")
-
-                        # Mark Attendance with photo and device_id mapping
-                        status, s_name, s_roll, s_time = mark_attendance(raw_id, matched_bytes, device_id=dev_id)
+                        # Mark Attendance with photo & device_id
+                        status, s_name, s_roll, s_time = mark_attendance(raw_id, face_bytes, device_id=dev_id)
                         if status in ("success", "already_marked"):
                             await self.broadcast_event({
                                 "type": "attendance", 
@@ -208,76 +154,29 @@ class TrackingController:
                                 "time": s_time or "Now",
                                 "device_id": dev_id
                             })
-
-                        # Update queue item result
-                        if i < len(queue_items):
-                            queue_items[i]["status"] = "match"
-                            queue_items[i]["name"] = display_name
-                            queue_items[i]["roll_number"] = roll_no
-                            queue_items[i]["score"] = round(res["score"], 1)
-                            queue_items[i]["result"] = f"✅ AWS MATCH APPROVED: {display_name} (Roll: {roll_no}) [Confidence: {res['score']:.1f}%]"
+                            print(f"[EDGE AI] 🎓 Attendance marked: {display_name} (Roll: {roll_no}) via {dev_id}")
                     else:
-                        self.tracker.objects[obj_id]["aws_status"] = "failed"
-                        if i < len(queue_items):
-                            queue_items[i]["status"] = "no_match"
-                            queue_items[i]["name"] = "Unknown Entity"
-                            queue_items[i]["roll_number"] = "N/A"
-                            queue_items[i]["result"] = "❌ NO MATCH IN AWS DATABASE — Identity Unregistered"
+                        q_item["status"] = "no_match"
+                        q_item["name"] = "Unknown Entity"
+                        q_item["roll_number"] = "N/A"
+                        q_item["result"] = "❌ NO MATCH IN AWS DATABASE — Identity Unregistered"
                 else:
-                    self.tracker.objects[obj_id]["aws_status"] = "failed"
-                    if i < len(queue_items):
-                        queue_items[i]["status"] = "no_match"
-                        queue_items[i]["name"] = "Unknown Entity"
-                        queue_items[i]["roll_number"] = "N/A"
-                        queue_items[i]["result"] = "❌ NO MATCH IN AWS DATABASE — Identity Unregistered"
+                    q_item["status"] = "no_match"
+                    q_item["name"] = "Unknown Entity"
+                    q_item["roll_number"] = "N/A"
+                    q_item["result"] = "❌ NO MATCH IN AWS DATABASE — Identity Unregistered"
 
-        # Broadcast Final Updated FIFO Queue & Stage Complete
-        if queue_items:
-            if dev_id in connected_devices and "cropped_queue" in connected_devices[dev_id]:
-                await self.broadcast_event({
-                    "type": "aws_queue_update",
-                    "device_id": dev_id,
-                    "queue": connected_devices[dev_id]["cropped_queue"]
-                })
+        # 6. Broadcast final updated FIFO queue & stage complete
+        if dev_id in connected_devices and "cropped_queue" in connected_devices[dev_id]:
+            await self.broadcast_event({
+                "type": "aws_queue_update",
+                "device_id": dev_id,
+                "queue": connected_devices[dev_id]["cropped_queue"]
+            })
 
         await self.broadcast_event({
             "type": "device_stage_update",
             "device_id": dev_id,
             "stage": "IDLE",
-            "message": f"Cycle Complete ({len(valid_faces)} Faces Scanned)"
-        })
-
-        # Prepare Web Response for local video overlays
-        client_faces = []
-        for object_id, obj in tracked_objects.items():
-            crop_str = ""
-            for vf in valid_faces:
-                if vf["box"]["x"] == obj["box"]["x"] and vf["box"]["y"] == obj["box"]["y"]:
-                    crop_str = f"data:image/jpeg;base64,{base64.b64encode(vf['bytes']).decode()}"
-                    break
-
-            display_title = obj["name"]
-            if obj.get("roll_number") and obj["roll_number"] != "N/A" and obj["name"] not in ("Scanning...", "SPOOF DETECTED", "SPOOF CONFIRMED"):
-                display_title = f"{obj['name']} ({obj['roll_number']})"
-
-            client_faces.append({
-                "id": object_id,
-                "name": display_title,
-                "raw_name": obj["name"],
-                "roll_number": obj.get("roll_number", "N/A"),
-                "status": obj["aws_status"] if obj["name"] != "Scanning..." else "verifying",
-                "score": obj["score"],
-                "box": {
-                    "x": int(obj["box"]["x"]*640), 
-                    "y": int(obj["box"]["y"]*480), 
-                    "w": int(obj["box"]["w"]*640), 
-                    "h": int(obj["box"]["h"]*480)
-                },
-                "crop": crop_str
-            })
-
-        await self.websocket.send_json({
-            "type": "ready", 
-            "faces": client_faces, 
-            "debug": f"Tracking {len(tracked_objects)} people"
+            "message": f"Cycle Complete ({len(valid_faces)} Faces Verified)"
         })
