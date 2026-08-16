@@ -27,9 +27,12 @@ TEACHER_PASSWORD = os.getenv("TEACHER_PASSWORD", "admin123")
 SECRET_KEY = os.getenv("SECRET_KEY", "nexus_secret_key_attendance_ai_2025")
 SESSION_COOKIE_NAME = "nexus_teacher_session"
 
-# --- SMTP Email Configuration ---
+# --- Email API Configuration (HTTPS REST - Port 443) ---
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+TEACHER_REPORT_EMAIL = os.getenv("TEACHER_REPORT_EMAIL", "shashankdubey822@gmail.com")
+
+# --- Legacy SMTP (Fallback) ---
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
 SMTP_EMAIL = os.getenv("SMTP_EMAIL", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-TEACHER_REPORT_EMAIL = os.getenv("TEACHER_REPORT_EMAIL", "shashankdubey822@gmail.com")
