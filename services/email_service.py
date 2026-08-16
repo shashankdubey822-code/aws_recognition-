@@ -1,4 +1,6 @@
 import os
+import socket
+import ssl
 import smtplib
 import traceback
 import pandas as pd
@@ -34,7 +36,7 @@ def get_latest_email_diagnostics() -> str:
         try:
             with open(DIAGNOSTICS_FILE, "r", encoding="utf-8") as f:
                 lines = f.readlines()
-                return "".join(lines[-40:]) # Return latest 40 entries
+                return "".join(lines[-40:])
         except Exception as e:
             return f"Error reading log: {e}"
     return "No email dispatch operations recorded yet."
@@ -73,6 +75,54 @@ def generate_session_excel(session_data: dict) -> str:
         
     return filepath
 
+def get_smtp_connection():
+    """
+    Establishes a resilient SMTP connection.
+    Enforces IPv4 to resolve Linux Docker 'Network is unreachable' [Errno 101] errors,
+    and attempts Port 465 (SSL) first, followed by Port 587 (STARTTLS).
+    """
+    server_host = SMTP_SERVER or "smtp.gmail.com"
+    
+    # 1. Resolve host strictly to IPv4 address to prevent IPv6 unreachable routing error
+    ipv4_address = server_host
+    try:
+        addr_info = socket.getaddrinfo(server_host, None, socket.AF_INET, socket.SOCK_STREAM)
+        if addr_info:
+            ipv4_address = addr_info[0][4][0]
+            log_email_diagnostic("DNS_RESOLVE", "SUCCESS", f"Resolved {server_host} -> IPv4 {ipv4_address}")
+    except Exception as dns_err:
+        log_email_diagnostic("DNS_RESOLVE", "WARNING", f"Could not force IPv4 resolution: {dns_err}")
+
+    # Strategy A: Try Port 465 (SMTPS with direct SSL)
+    try:
+        log_email_diagnostic("SMTP_CONNECT", "TRY_PORT_465_SSL", f"Attempting direct SSL connection to {server_host} (Port 465)...")
+        context = ssl.create_default_context()
+        server = smtplib.SMTP_SSL(server_host, 465, context=context, timeout=15)
+        log_email_diagnostic("SMTP_CONNECT", "SUCCESS", "Connected securely via Port 465 (SSL)!")
+        return server
+    except Exception as e465:
+        log_email_diagnostic("SMTP_CONNECT", "FALLBACK", f"Port 465 failed ({e465}). Trying Port 587 STARTTLS...")
+
+    # Strategy B: Try Port 587 (STARTTLS)
+    try:
+        log_email_diagnostic("SMTP_CONNECT", "TRY_PORT_587_TLS", f"Attempting STARTTLS connection to {server_host} (Port 587)...")
+        server = smtplib.SMTP(server_host, 587, timeout=15)
+        server.starttls()
+        log_email_diagnostic("SMTP_CONNECT", "SUCCESS", "Connected securely via Port 587 (STARTTLS)!")
+        return server
+    except Exception as e587:
+        log_email_diagnostic("SMTP_CONNECT", "FALLBACK", f"Port 587 failed ({e587}). Trying direct IPv4 {ipv4_address}:465...")
+
+    # Strategy C: Try direct IPv4 address on Port 465
+    try:
+        context = ssl.create_default_context()
+        server = smtplib.SMTP_SSL(ipv4_address, 465, context=context, timeout=15)
+        log_email_diagnostic("SMTP_CONNECT", "SUCCESS", f"Connected via direct IPv4 {ipv4_address}:465!")
+        return server
+    except Exception as e_ip:
+        log_email_diagnostic("SMTP_CONNECT", "FAILED", f"All connection strategies failed: {e_ip}")
+        raise e_ip
+
 def send_session_email_report(session_data: dict, recipient: str = None) -> tuple[bool, str]:
     """Sends session summary and Excel report via SMTP to the teacher with full step-by-step diagnostic tracing."""
     target_email = recipient or TEACHER_REPORT_EMAIL
@@ -89,7 +139,7 @@ def send_session_email_report(session_data: dict, recipient: str = None) -> tupl
     log_email_diagnostic(
         "ENV_CONFIG_CHECK", 
         "CHECK", 
-        f"SMTP_SERVER='{SMTP_SERVER}', SMTP_PORT={SMTP_PORT}, SMTP_EMAIL={'CONFIGURED (' + SMTP_EMAIL + ')' if has_email else 'MISSING / EMPTY'}, SMTP_PASSWORD={'CONFIGURED (LENGTH ' + str(len(SMTP_PASSWORD)) + ')' if has_pass else 'MISSING / EMPTY'}"
+        f"SMTP_SERVER='{SMTP_SERVER}', SMTP_EMAIL={'CONFIGURED (' + SMTP_EMAIL + ')' if has_email else 'MISSING / EMPTY'}, SMTP_PASSWORD={'CONFIGURED (LENGTH ' + str(len(SMTP_PASSWORD)) + ')' if has_pass else 'MISSING / EMPTY'}"
     )
     
     report_path = generate_session_excel(session_data)
@@ -99,7 +149,7 @@ def send_session_email_report(session_data: dict, recipient: str = None) -> tupl
         error_explanation = (
             "🚨 CRITICAL EMAIL CONFIGURATION ERROR: "
             "SMTP_EMAIL or SMTP_PASSWORD environment variable is empty! "
-            "To fix: Open Hugging Face Settings -> Variables and secrets -> Add 'SMTP_EMAIL' and 'SMTP_PASSWORD' (Google App Password)."
+            "To fix: Open Hugging Face Settings -> Variables and secrets -> Add 'SMTP_EMAIL' and 'SMTP_PASSWORD'."
         )
         log_email_diagnostic("CREDENTIAL_VALIDATION", "FAILED", error_explanation)
         return False, error_explanation
@@ -209,15 +259,14 @@ def send_session_email_report(session_data: dict, recipient: str = None) -> tupl
 
         log_email_diagnostic("MIME_BUILD", "SUCCESS", f"MIME message ready (Excel + {attached_photos_count} student photos attached)")
 
-        # 3. Step: Connect to SMTP Server
-        log_email_diagnostic("SMTP_CONNECT", "CONNECTING", f"Connecting to {SMTP_SERVER}:{SMTP_PORT} via TLS...")
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
-        server.starttls()
-        log_email_diagnostic("SMTP_CONNECT", "SUCCESS", "TLS handshake established.")
+        # 3. Step: Connect to SMTP Server with Resilient Strategy (IPv4 / Port 465 SSL / Port 587 TLS)
+        server = get_smtp_connection()
         
         # 4. Step: Authenticate
         log_email_diagnostic("SMTP_AUTH", "AUTHENTICATING", f"Authenticating as '{SMTP_EMAIL}'...")
-        server.login(SMTP_EMAIL, SMTP_PASSWORD)
+        # Clean password (remove spaces in app password if any)
+        clean_password = SMTP_PASSWORD.replace(" ", "").strip()
+        server.login(SMTP_EMAIL.strip(), clean_password)
         log_email_diagnostic("SMTP_AUTH", "SUCCESS", "Google SMTP Authentication Granted!")
 
         # 5. Step: Send Message
@@ -232,10 +281,6 @@ def send_session_email_report(session_data: dict, recipient: str = None) -> tupl
     except smtplib.SMTPAuthenticationError as auth_err:
         err_msg = f"Google SMTP Authentication Rejected (Code {auth_err.smtp_code}): Check your 16-character App Password."
         log_email_diagnostic("SMTP_AUTH", "FAILED", err_msg)
-        return False, err_msg
-    except smtplib.SMTPConnectError as conn_err:
-        err_msg = f"Could not connect to SMTP server {SMTP_SERVER}:{SMTP_PORT}: {conn_err}"
-        log_email_diagnostic("SMTP_CONNECT", "FAILED", err_msg)
         return False, err_msg
     except Exception as e:
         full_trace = traceback.format_exc()
