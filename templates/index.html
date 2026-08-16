@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nexus.AI — Instructor Attendance & Surveillance Hub</title>
+    <title>Nexus.AI — Instructor Surveillance & Attendance Hub</title>
     <!-- Authentication Guard for Iframe / LocalStorage -->
     <script>
         (function() {
@@ -21,10 +21,9 @@
     <!-- TailwindCSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Google Fonts for premium typography -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Orbitron:wght@600;700;800;900&display=swap" rel="stylesheet">
     <script>
         tailwind.config = {
-            darkMode: 'class',
             theme: {
                 extend: {
                     fontFamily: {
@@ -33,10 +32,10 @@
                     },
                     colors: {
                         brand: {
-                            cyan: '#00d2ff',
-                            emerald: '#10b981',
-                            dark: '#050505',
-                            panel: 'rgba(20, 20, 25, 0.7)'
+                            cyan: '#0284c7',
+                            emerald: '#059669',
+                            dark: '#0f172a',
+                            panel: 'rgba(255, 255, 255, 0.8)'
                         }
                     },
                     animation: {
@@ -45,8 +44,8 @@
                     },
                     keyframes: {
                         slideIn: {
-                            '0%': { opacity: 0, transform: 'translateX(20px)' },
-                            '100%': { opacity: 1, transform: 'translateX(0)' },
+                            '0%': { opacity: 0, transform: 'translateY(10px)' },
+                            '100%': { opacity: 1, transform: 'translateY(0)' },
                         }
                     }
                 }
@@ -54,544 +53,524 @@
         }
     </script>
     <style>
-        /* High-End Glassmorphism */
+        /* Light Glassmorphism Architecture */
         body {
-            background-color: #050505;
+            background-color: #f8fafc;
             background-image: 
-                radial-gradient(circle at 15% 50%, rgba(0, 210, 255, 0.05), transparent 25%),
-                radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.05), transparent 25%);
-            color: #e2e8f0;
+                radial-gradient(circle at 10% 15%, rgba(2, 132, 199, 0.08), transparent 30%),
+                radial-gradient(circle at 90% 25%, rgba(5, 150, 105, 0.08), transparent 30%),
+                radial-gradient(circle at 50% 85%, rgba(99, 102, 241, 0.05), transparent 40%);
+            color: #0f172a;
             overflow-x: hidden;
+            min-height: 100vh;
         }
         .glass-panel {
-            background: rgba(20, 20, 25, 0.6);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(226, 232, 240, 0.9);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.03), 0 0 0 1px rgba(255, 255, 255, 0.8) inset;
         }
-        .glass-border-gradient {
-            position: relative;
+        .glass-card {
+            background: rgba(255, 255, 255, 0.65);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(226, 232, 240, 0.8);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.02);
         }
-        .glass-border-gradient::before {
-            content: "";
-            position: absolute;
-            inset: 0;
-            border-radius: inherit;
-            padding: 1px;
-            background: linear-gradient(135deg, rgba(0,210,255,0.4), rgba(16,185,129,0.1));
-            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-            -webkit-mask-composite: xor;
-            mask-composite: exclude;
-            pointer-events: none;
+        .glass-inner {
+            background: rgba(248, 250, 252, 0.7);
+            border: 1px solid rgba(226, 232, 240, 0.8);
         }
-        /* Custom Scrollbar */
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
-        ::-webkit-scrollbar-thumb { background: rgba(0,210,255,0.3); border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: rgba(0,210,255,0.6); }
+        .glass-input {
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid rgba(203, 213, 225, 0.9);
+            color: #0f172a;
+        }
+        .glass-input:focus {
+            border-color: #0284c7;
+            box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+            outline: none;
+        }
+        /* Custom Light Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(241, 245, 249, 0.6); }
+        ::-webkit-scrollbar-thumb { background: rgba(203, 213, 225, 0.9); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.9); }
 
-        /* HUD Scanner */
-        #demo-video-container {
-            position: relative;
-            border-radius: 1rem;
-            overflow: hidden;
-            box-shadow: 0 0 40px rgba(0,210,255,0.1);
-        }
-        #videoElement {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-            background: #000;
-        }
-        .mirror-video {
-            transform: scaleX(-1);
-        }
-        #overlayCanvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 10;
-        }
-        
-        /* Toast Notifications */
-        #toast-container {
-            position: fixed;
-            top: 1rem;
-            right: 1rem;
-            z-index: 5000;
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
         .toast {
-            min-width: 320px;
+            animation: slideIn 0.3s ease-out forwards;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(226, 232, 240, 0.9);
+            box-shadow: 0 15px 30px rgba(0,0,0,0.08);
+            border-radius: 1rem;
             padding: 1rem;
-            border-radius: 0.5rem;
             display: flex;
             align-items: center;
             gap: 0.75rem;
-            animation: slideIn 0.3s ease-out forwards;
-            background: rgba(10, 10, 15, 0.95);
-            backdrop-filter: blur(10px);
-            border-left: 4px solid;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            min-width: 280px;
         }
-        .toast.error { border-left-color: #ef4444; }
-        .toast.warning { border-left-color: #f59e0b; }
-        .toast.success { border-left-color: #10b981; }
-        .toast.info { border-left-color: #3b82f6; }
+        .toast.success { border-left: 4px solid #059669; }
+        .toast.error { border-left: 4px solid #dc2626; }
+        .toast.warning { border-left: 4px solid #d97706; }
+        .toast.info { border-left: 4px solid #0284c7; }
     </style>
 </head>
-<body class="min-h-screen flex flex-col font-sans">
+<body class="p-3 sm:p-6 flex flex-col items-center min-h-screen relative font-sans antialiased">
 
-    <!-- Toast Notifications Container -->
-    <div id="toast-container"></div>
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-3 pointer-events-none"></div>
 
-    <!-- RAW IMAGE FULLSCREEN LIGHTBOX MODAL -->
-    <div id="raw-lightbox" class="fixed inset-0 z-[3500] hidden flex items-center justify-center bg-black/90 backdrop-blur-md p-4 transition-all duration-300">
-        <div class="glass-panel glass-border-gradient rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl relative">
-            <div class="p-4 border-b border-white/10 flex justify-between items-center bg-black/40">
-                <div class="flex items-center gap-3">
-                    <span class="w-3 h-3 rounded-full bg-brand-cyan animate-pulse"></span>
-                    <div>
-                        <h3 id="lightbox-device-title" class="font-bold text-white font-mono text-sm">Raspberry Pi Raw Frame</h3>
-                        <p id="lightbox-meta-subtitle" class="text-xs text-slate-400 font-mono">Captured: 12:00:00 | IP: 127.0.0.1</p>
-                    </div>
+    <!-- MAIN CONTAINER -->
+    <div class="w-full max-w-7xl flex flex-col gap-6 relative z-10">
+
+        <!-- ================= TOP COMMAND BAR & NAV ================= -->
+        <header class="glass-panel w-full rounded-2xl p-4 sm:p-5 flex flex-wrap justify-between items-center gap-4">
+            
+            <!-- Logo & Brand -->
+            <div class="flex items-center gap-3">
+                <div class="w-11 h-11 rounded-xl bg-gradient-to-br from-sky-500 to-emerald-500 flex items-center justify-center shadow-[0_8px_20px_rgba(2,132,199,0.25)]">
+                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                    </svg>
                 </div>
-                <div class="flex items-center gap-2">
-                    <a id="lightbox-download-link" href="#" download="raw_frame.jpg" class="bg-brand-cyan/20 hover:bg-brand-cyan/30 text-brand-cyan border border-brand-cyan/40 px-3 py-1.5 rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 transition-all">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                        Download High-Res
-                    </a>
-                    <button id="lightbox-close-btn" class="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 text-xl font-bold font-mono transition-all">&times;</button>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h1 class="text-xl font-extrabold tracking-wider text-slate-900 font-mono">NEXUS<span class="text-sky-600">.AI</span></h1>
+                        <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">v3.0 ENTERPRISE</span>
+                    </div>
+                    <p class="text-[10px] text-slate-500 font-mono tracking-wider uppercase font-semibold">Central Edge Command Center</p>
                 </div>
             </div>
-            <div class="flex-1 bg-black/80 p-4 flex items-center justify-center overflow-auto">
-                <img id="lightbox-img" src="" alt="Raw Captured Frame" class="max-w-full max-h-[70vh] object-contain rounded-lg border border-white/10 shadow-2xl">
+
+            <!-- Top Navigation Tabs -->
+            <div class="flex items-center gap-2 bg-slate-100/80 p-1.5 rounded-xl border border-slate-200">
+                <button id="tab-dashboard-btn" class="px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-white text-sky-700 shadow-sm border border-slate-200/80">
+                    🏛️ Main Command Hub
+                </button>
+                <button id="tab-devices-btn" class="px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5">
+                    📡 Currently Running (Edge Pis)
+                    <span id="active-devices-badge" class="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-100 text-emerald-800 font-bold">0</span>
+                </button>
+            </div>
+
+            <!-- System Status & Actions -->
+            <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+                <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span id="ws-status" class="text-xs font-mono font-bold text-emerald-700 tracking-wide">SYSTEM ONLINE</span>
+                </div>
+
+                <!-- Webcam Demo Button -->
+                <button id="open-demo-btn" class="px-3.5 py-1.5 rounded-xl bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 text-xs font-mono font-bold transition-all flex items-center gap-1.5 shadow-sm">
+                    <span>🎥 WEBCAM DEMO</span>
+                </button>
+
+                <!-- Student Registration Button -->
+                <button id="add-student-btn" class="px-3.5 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 text-xs font-mono font-bold transition-all flex items-center gap-1.5 shadow-sm">
+                    <span>+ REGISTER STUDENT</span>
+                </button>
+
+                <!-- Export Logs -->
+                <button id="download-btn" class="px-3.5 py-1.5 rounded-xl bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 text-xs font-mono font-bold transition-all flex items-center gap-1.5 shadow-sm">
+                    <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    <span>EXPORT LOGS</span>
+                </button>
+
+                <!-- Clear Frame Cache Button -->
+                <button id="clear-cache-btn" class="px-3 py-1.5 rounded-xl bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 text-xs font-mono font-bold transition-all flex items-center gap-1 shadow-sm">
+                    <span>🧹 CLEAR CACHE</span>
+                </button>
+
+                <!-- Wipe DB -->
+                <button id="delete-all-btn" class="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 text-xs font-mono font-bold transition-all flex items-center gap-1 shadow-sm">
+                    <span>WIPE DB</span>
+                </button>
+
+                <!-- Teacher User Profile & Logout -->
+                <div class="flex items-center gap-2 pl-2 border-l border-slate-200">
+                    <span class="text-xs text-slate-600 font-mono hidden md:inline font-semibold">{{ teacher_email }}</span>
+                    <a href="/logout" onclick="localStorage.removeItem('nexus_auth_token');" class="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-mono font-bold transition-all border border-slate-200">
+                        LOGOUT
+                    </a>
+                </div>
+            </div>
+        </header>
+
+
+        <!-- ================= VIEW 1: MAIN COMMAND HUB ================= -->
+        <div id="view-dashboard" class="flex flex-col gap-6">
+
+            <!-- 1. Enterprise Session Controller & Metrics Row -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                
+                <!-- Active Session Control Panel (Span 2) -->
+                <div class="glass-panel md:col-span-2 rounded-2xl p-5 flex flex-col justify-between gap-4">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <span class="text-[10px] font-mono uppercase tracking-widest text-slate-500 font-bold">Session State (24h IST)</span>
+                            <div class="flex items-center gap-2 mt-1">
+                                <span id="session-indicator" class="inline-block w-2.5 h-2.5 rounded-full bg-slate-400"></span>
+                                <h3 id="session-status-label" class="text-lg font-bold text-slate-900 font-mono tracking-wide">STANDBY / CONCLUDED</h3>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <span class="text-[10px] font-mono uppercase tracking-widest text-slate-500 font-bold">Present in Session</span>
+                            <div id="session-present-count" class="text-2xl font-extrabold text-emerald-600 font-mono">0</div>
+                        </div>
+                    </div>
+
+                    <!-- Session Action Controls -->
+                    <div class="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-200/80">
+                        <!-- Start Session Form -->
+                        <div class="flex items-center gap-2 flex-1">
+                            <label for="session-duration-select" class="text-xs font-mono text-slate-600 font-semibold whitespace-nowrap">Duration:</label>
+                            <select id="session-duration-select" class="glass-input text-xs font-mono px-3 py-2 rounded-xl focus:outline-none">
+                                <option value="2">2 Minutes (Quick Demo)</option>
+                                <option value="15">15 Minutes</option>
+                                <option value="30">30 Minutes</option>
+                                <option value="45">45 Minutes</option>
+                                <option value="50" selected>50 Minutes (Standard Lecture)</option>
+                                <option value="60">60 Minutes (1 Hour)</option>
+                                <option value="90">90 Minutes (Lab Session)</option>
+                            </select>
+                        </div>
+
+                        <button id="start-session-btn" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-sky-600 to-emerald-600 hover:from-sky-700 hover:to-emerald-700 text-white font-mono font-bold text-xs tracking-wider transition-all flex items-center gap-2 shadow-[0_8px_16px_rgba(2,132,199,0.25)]">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            <span>START MONITORING</span>
+                        </button>
+
+                        <div id="session-timer-box" class="hidden flex items-center gap-3">
+                            <div class="px-3.5 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 font-mono font-bold text-sm tracking-wider flex items-center gap-2">
+                                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                                <span id="session-timer-display">00:00</span>
+                            </div>
+                        </div>
+
+                        <button id="stop-session-btn" class="hidden px-4 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-mono font-bold text-xs tracking-wider transition-all flex items-center gap-1.5 shadow-sm">
+                            <svg class="w-4 h-4 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"></path></svg>
+                            <span>STOP & DISPATCH REPORT</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Stat Card 1: Monitoring State -->
+                <div class="glass-panel rounded-2xl p-5 flex flex-col justify-between">
+                    <div class="flex justify-between items-center text-slate-500">
+                        <span class="text-[10px] font-mono uppercase tracking-widest font-bold">Surveillance Node</span>
+                        <svg class="w-5 h-5 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                    </div>
+                    <div class="mt-2">
+                        <div id="stat-session-status" class="text-base font-bold font-mono text-slate-700">STANDBY</div>
+                        <div class="text-[11px] text-slate-500 font-mono mt-1">Classroom Nodes: Ready</div>
+                    </div>
+                </div>
+
+                <!-- Stat Card 2: Connected Edge Nodes -->
+                <div class="glass-panel rounded-2xl p-5 flex flex-col justify-between">
+                    <div class="flex justify-between items-center text-slate-500">
+                        <span class="text-[10px] font-mono uppercase tracking-widest font-bold">Active Raspberry Pis</span>
+                        <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path></svg>
+                    </div>
+                    <div class="mt-2">
+                        <div id="stat-active-pis" class="text-2xl font-extrabold font-mono text-slate-900">0</div>
+                        <div class="text-[11px] text-emerald-600 font-mono mt-1 font-semibold">Automatic 15s HD Edge Feed</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. Dual Main Section: Live Verified Attendance Ledger & Hacker Terminal -->
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+                <!-- Left Column (Span 7): Real-Time Verified Attendance Ledger -->
+                <div class="lg:col-span-7 flex flex-col gap-6">
+                    <div class="glass-panel rounded-2xl p-5 flex flex-col flex-1">
+                        <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-200/80">
+                            <div>
+                                <h3 class="text-base font-bold text-slate-900 font-mono flex items-center gap-2">
+                                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                                    <span>SESSION ATTENDANCE LEDGER</span>
+                                </h3>
+                                <p id="ledger-session-id-label" class="text-[11px] text-slate-500 font-mono mt-0.5">Session: None (Standing by)</p>
+                            </div>
+                            <span class="text-xs font-mono px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold">
+                                24-HOUR IST ACTIVE
+                            </span>
+                        </div>
+
+                        <!-- Live Attendee Feed (Scrollable) -->
+                        <div id="confirmed-list" class="flex flex-col gap-3 overflow-y-auto max-h-[520px] pr-1">
+                            <div class="text-center text-slate-400 py-24 text-xs font-mono tracking-widest">
+                                AWAITING CLASSROOM ATTENDANCE (SCANNING VIA RASPBERRY PI)...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column (Span 5): System Diagnostics & Live Telemetry -->
+                <div class="lg:col-span-5 flex flex-col gap-6">
+
+                    <!-- Live Terminal Audit Logs -->
+                    <div class="glass-panel rounded-2xl p-5 flex flex-col flex-1">
+                        <div class="flex justify-between items-center mb-3 pb-2 border-b border-slate-200/80">
+                            <span class="text-xs font-mono font-bold text-slate-700 flex items-center gap-2">
+                                <span class="w-2 h-2 rounded-full bg-sky-500 animate-pulse"></span>
+                                <span>CENTRAL AUDIT EVENT LOG</span>
+                            </span>
+                            <span class="text-[10px] font-mono text-slate-400">TELEMETRY STREAM</span>
+                        </div>
+
+                        <!-- Terminal Window (Light Editor Theme) -->
+                        <div id="terminal-logs" class="bg-slate-900 text-slate-200 p-4 rounded-xl font-mono text-[11px] leading-relaxed overflow-y-auto h-[260px] flex flex-col gap-1.5 shadow-inner border border-slate-800">
+                            <div class="text-sky-400">[00:00:00] [-] System initialized. Central Hub listening on WebSocket...</div>
+                            <div class="text-emerald-400">[00:00:00] [+] AWS Cloud AI Collection connected.</div>
+                            <div class="text-slate-400">[00:00:00] [-] Standby mode active. Awaiting start command.</div>
+                        </div>
+                    </div>
+
+                    <!-- Email Diagnostics Live Status Box -->
+                    <div class="glass-panel rounded-2xl p-5 flex flex-col gap-3">
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs font-mono font-bold text-slate-800 flex items-center gap-2">
+                                <span>📧 EMAIL DISPATCH ENGINE</span>
+                            </span>
+                            <a href="/api/email_diagnostics" target="_blank" class="text-[10px] font-mono text-sky-600 hover:text-sky-800 underline font-bold">
+                                View Diagnostics Log ↗
+                            </a>
+                        </div>
+                        <p class="text-xs text-slate-600 leading-relaxed">
+                            Upon session conclusion, full attendance reports with attached <strong class="text-slate-800">.xlsx workbooks</strong> and student verification photos are delivered via secure HTTPS REST API to:
+                        </p>
+                        <div class="p-3 rounded-xl bg-sky-50 border border-sky-200 text-xs font-mono font-bold text-sky-800 flex items-center justify-between">
+                            <span>📮 {{ teacher_email }}</span>
+                            <span class="text-[10px] bg-sky-200/60 text-sky-900 px-2 py-0.5 rounded">PORT 443 HTTPS</span>
+                        </div>
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- ================= VIEW 2: CURRENTLY RUNNING (EDGE PIS) ================= -->
+        <div id="view-devices" class="hidden flex flex-col gap-6">
+
+            <!-- Devices Overview Bar -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div class="glass-panel rounded-2xl p-4">
+                    <span class="text-[10px] font-mono uppercase tracking-widest text-slate-500 font-bold">Total Edge Nodes</span>
+                    <div id="stat-total-devices" class="text-2xl font-extrabold font-mono text-slate-900 mt-1">0</div>
+                </div>
+                <div class="glass-panel rounded-2xl p-4">
+                    <span class="text-[10px] font-mono uppercase tracking-widest text-emerald-600 font-bold">Active Streaming</span>
+                    <div id="stat-active-devices" class="text-2xl font-extrabold font-mono text-emerald-600 mt-1">0</div>
+                </div>
+                <div class="glass-panel rounded-2xl p-4">
+                    <span class="text-[10px] font-mono uppercase tracking-widest text-slate-500 font-bold">Standby Nodes</span>
+                    <div id="stat-standby-devices" class="text-2xl font-extrabold font-mono text-slate-600 mt-1">0</div>
+                </div>
+                <div class="glass-panel rounded-2xl p-4">
+                    <span class="text-[10px] font-mono uppercase tracking-widest text-sky-600 font-bold">Total Ingested Frames</span>
+                    <div id="stat-total-frames" class="text-2xl font-extrabold font-mono text-sky-600 mt-1">0</div>
+                </div>
+            </div>
+
+            <!-- Devices Split Screen -->
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                
+                <!-- Left Column: Edge Device Cards List (Span 4) -->
+                <div class="lg:col-span-4 flex flex-col gap-4">
+                    <div class="glass-panel rounded-2xl p-4 flex flex-col h-full">
+                        <div class="flex justify-between items-center mb-3 pb-2 border-b border-slate-200/80">
+                            <span class="text-xs font-mono font-bold text-slate-800 flex items-center gap-2">
+                                <svg class="w-4 h-4 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                                <span>Registered Edge Nodes</span>
+                            </span>
+                            <div class="flex items-center gap-1 text-[10px] font-mono">
+                                <button id="filter-all-devices-btn" class="px-2 py-0.5 rounded bg-sky-100 text-sky-800 font-bold">ALL</button>
+                                <button id="filter-active-devices-btn" class="px-2 py-0.5 rounded text-slate-500 hover:text-slate-900">ACTIVE</button>
+                                <button id="filter-stopped-devices-btn" class="px-2 py-0.5 rounded text-slate-500 hover:text-slate-900">STOPPED</button>
+                            </div>
+                        </div>
+
+                        <!-- Device Cards Container -->
+                        <div id="devices-cards-list" class="flex flex-col gap-3 overflow-y-auto max-h-[600px] pr-1">
+                            <div class="text-center text-slate-400 py-12 font-mono text-xs">
+                                No registered edge devices connected.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column: Selected Device Deep Dive Inspector (Span 8) -->
+                <div class="lg:col-span-8 flex flex-col gap-4">
+                    <div class="glass-panel rounded-2xl p-5 flex flex-col flex-1 min-h-[550px]">
+                        
+                        <!-- Inspector Header -->
+                        <div class="flex flex-wrap justify-between items-center gap-3 mb-4 pb-3 border-b border-slate-200/80">
+                            <div>
+                                <div class="flex items-center gap-2.5">
+                                    <span id="selected-device-indicator" class="w-3 h-3 rounded-full bg-slate-400"></span>
+                                    <h3 id="selected-device-name" class="text-base font-bold text-slate-900 font-mono">Select a Classroom Node</h3>
+                                </div>
+                                <p id="selected-device-submeta" class="text-[11px] text-slate-500 font-mono mt-0.5">IP: --- | Registered: --- | Total Frames: 0</p>
+                            </div>
+                            <span id="selected-device-status-badge" class="text-xs font-mono text-slate-600 bg-slate-100 px-3 py-1 rounded-xl border border-slate-200 font-bold">
+                                STANDBY / IDLE
+                            </span>
+                        </div>
+
+                        <!-- 3 Deep Inspector Tabs -->
+                        <div class="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
+                            <button id="dev-tab-students-btn" class="px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 transition-all flex items-center gap-1.5 whitespace-nowrap shadow-sm">
+                                <span>🎓 Verified Students (Name + Roll)</span>
+                            </button>
+                            <button id="dev-tab-queue-btn" class="px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5 whitespace-nowrap">
+                                <span>✂️ Live Cropped Faces & AWS Queue (FIFO)</span>
+                            </button>
+                            <button id="dev-tab-frames-btn" class="px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5 whitespace-nowrap">
+                                <span>📸 Raw Uncropped Frames</span>
+                            </button>
+                        </div>
+
+                        <!-- Panel A: Verified Students from this Device -->
+                        <div id="dev-panel-students" class="flex flex-col gap-2.5 overflow-y-auto max-h-[480px] pr-1">
+                            <div class="text-center text-slate-400 py-16 font-mono text-xs">
+                                No students verified from this specific camera node yet.
+                            </div>
+                        </div>
+
+                        <!-- Panel B: Live Cropped Faces & AWS FIFO Queue -->
+                        <div id="dev-panel-queue" class="hidden flex flex-col gap-2.5 overflow-y-auto max-h-[480px] pr-1">
+                            <div class="text-center text-slate-400 py-16 font-mono text-xs">
+                                No cropped faces currently in FIFO pipeline for this device.
+                            </div>
+                        </div>
+
+                        <!-- Panel C: Raw Uncropped Frames Gallery -->
+                        <div id="dev-panel-frames" class="hidden grid grid-cols-2 sm:grid-cols-3 gap-3 overflow-y-auto max-h-[480px] pr-1">
+                            <div class="col-span-full text-center text-slate-400 py-16 font-mono text-xs">
+                                No raw frames captured for this device yet.
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <!-- ================= MODAL: LOCAL WEBCAM DEMO TESTER ================= -->
+    <div id="demo-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+        <div class="glass-panel w-full max-w-3xl rounded-3xl p-6 relative overflow-hidden flex flex-col gap-4 shadow-2xl">
+            <div class="flex justify-between items-center pb-3 border-b border-slate-200/80">
+                <div class="flex items-center gap-2.5">
+                    <span class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <h3 class="font-bold text-slate-900 font-mono text-sm">Local Browser Webcam Tester</h3>
+                </div>
+                <button id="close-demo-btn" class="px-3 py-1 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 text-xs font-mono font-bold transition-all">
+                    ✕ CLOSE DEMO
+                </button>
+            </div>
+
+            <div class="relative aspect-video rounded-2xl overflow-hidden bg-slate-900 flex items-center justify-center shadow-md">
+                <video id="videoElement" autoplay playsinline muted class="w-full h-full object-cover"></video>
+                <canvas id="overlayCanvas" class="absolute inset-0 w-full h-full pointer-events-none"></canvas>
+                <canvas id="canvasElement" class="hidden"></canvas>
+            </div>
+
+            <div class="flex justify-between items-center text-xs font-mono text-slate-600">
+                <div class="flex items-center gap-2">
+                    <span>Camera:</span>
+                    <select id="camera-select" class="glass-input px-2 py-1 rounded-lg text-xs font-mono"></select>
+                </div>
+                <div>FPS: <span id="fps-counter" class="text-emerald-600 font-bold">0</span></div>
             </div>
         </div>
     </div>
 
-    <!-- ON-DEMAND WEBCAM DEMO TESTER MODAL -->
-    <div id="demo-modal" class="fixed inset-0 z-[3000] hidden flex items-center justify-center bg-black/90 backdrop-blur-md p-4 transition-all duration-300">
-        <div class="glass-panel glass-border-gradient rounded-2xl max-w-5xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative">
-            <div class="p-4 border-b border-white/10 flex justify-between items-center bg-black/40">
-                <div class="flex items-center gap-3">
-                    <div class="w-3 h-3 rounded-full bg-brand-emerald animate-ping"></div>
-                    <div>
-                        <h3 class="font-bold text-white font-mono text-sm flex items-center gap-2">
-                            🧪 Local Webcam Demo & AI Vision Tester
-                        </h3>
-                        <p class="text-xs text-slate-400 font-mono">Live Liveness Detection + Face Tracking Sandbox</p>
-                    </div>
+
+    <!-- ================= MODAL: STUDENT REGISTRATION ================= -->
+    <div id="modal-backdrop" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+        <div class="glass-panel w-full max-w-md rounded-3xl p-6 sm:p-8 relative overflow-hidden flex flex-col gap-5 shadow-2xl">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
                 </div>
-                <div class="flex items-center gap-3">
-                    <select id="camera-select" class="bg-black/60 text-brand-cyan border border-brand-cyan/40 px-3 py-1.5 rounded-lg text-xs font-mono font-bold focus:outline-none focus:border-brand-cyan cursor-pointer">
-                        <option value="">📷 DETECTING CAMERAS...</option>
-                    </select>
-                    <button id="close-demo-btn" class="bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/40 px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all">
-                        ✕ CLOSE TESTER
+                <div>
+                    <h3 class="font-bold text-slate-900 font-mono text-base">Register New Student</h3>
+                    <p class="text-xs text-slate-500 font-mono">Biometric Cloud Vector Mapping</p>
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-4">
+                <div>
+                    <label class="block text-xs font-mono font-bold text-slate-600 uppercase mb-1">Student Full Name</label>
+                    <input type="text" id="student-name-input" placeholder="e.g. Shashank Dubey" class="glass-input w-full px-4 py-2.5 rounded-xl text-sm font-sans">
+                </div>
+                <div>
+                    <label class="block text-xs font-mono font-bold text-slate-600 uppercase mb-1">Roll Number / Student ID</label>
+                    <input type="text" id="student-roll-input" placeholder="e.g. 24 or 2024/CS/101" class="glass-input w-full px-4 py-2.5 rounded-xl text-sm font-sans">
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-3 pt-2">
+                <button id="cancel-btn" class="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 text-xs font-mono font-bold transition-all">
+                    CANCEL
+                </button>
+                <button id="start-scan-btn" class="px-5 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-emerald-600 text-white text-xs font-mono font-bold tracking-wider transition-all shadow-md">
+                    START 3D SCAN
+                </button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ================= SCAN PROGRESS OVERLAY ================= -->
+    <div id="reg-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+        <div class="glass-panel w-full max-w-sm rounded-3xl p-6 text-center flex flex-col items-center gap-4 shadow-2xl">
+            <div class="w-16 h-16 rounded-full border-4 border-emerald-500 border-t-transparent animate-spin"></div>
+            <h4 id="reg-instruction" class="font-bold text-slate-900 font-mono text-base">SCANNING FACE...</h4>
+            <p id="reg-subtext" class="text-xs text-slate-500 font-sans">Align face with camera sensor...</p>
+            <div class="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                <div id="reg-progress-bar" class="bg-gradient-to-r from-sky-500 to-emerald-500 h-full w-0 transition-all duration-200"></div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ================= MODAL: RAW FRAME LIGHTBOX ================= -->
+    <div id="raw-lightbox" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md">
+        <div class="glass-panel w-full max-w-5xl rounded-3xl p-5 relative overflow-hidden flex flex-col gap-3 shadow-2xl">
+            <div class="flex justify-between items-center pb-2 border-b border-slate-200">
+                <div>
+                    <h3 id="lightbox-device-title" class="font-bold text-slate-900 font-mono text-sm">Classroom 101 — Raw Frame</h3>
+                    <p id="lightbox-meta-subtitle" class="text-[10px] text-slate-500 font-mono">Timestamp: --:--:-- | Full Resolution</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <a id="lightbox-download-link" href="#" target="_blank" class="px-3 py-1 rounded-xl bg-sky-50 text-sky-700 border border-sky-200 text-xs font-mono font-bold">
+                        OPEN FULL RES ↗
+                    </a>
+                    <button id="lightbox-close-btn" class="px-3 py-1 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 text-xs font-mono font-bold">
+                        ✕ CLOSE
                     </button>
                 </div>
             </div>
-            
-            <div class="p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 overflow-y-auto">
-                <div class="lg:col-span-8 flex flex-col">
-                    <div id="demo-video-container" class="relative flex-1 bg-black rounded-2xl border border-white/10 flex items-center justify-center min-h-[420px]">
-                        <canvas id="canvasElement" style="display: none;"></canvas>
-                        <video id="videoElement" autoplay playsinline muted></video>
-                        <canvas id="overlayCanvas"></canvas>
-                    </div>
-                </div>
-
-                <div class="lg:col-span-4 flex flex-col gap-4">
-                    <div class="bg-black/50 rounded-xl p-4 border border-white/10 flex flex-col gap-3">
-                        <div class="text-xs font-mono uppercase text-brand-cyan font-bold">Local Vision Telemetry</div>
-                        <div class="grid grid-cols-2 gap-2 text-xs font-mono">
-                            <div class="bg-black/60 p-2.5 rounded-lg border border-white/5">
-                                <div class="text-[10px] text-slate-500 uppercase">FPS</div>
-                                <div class="text-lg font-bold text-white" id="fps-counter">0</div>
-                            </div>
-                            <div class="bg-black/60 p-2.5 rounded-lg border border-white/5">
-                                <div class="text-[10px] text-slate-500 uppercase">Faces in FOV</div>
-                                <div class="text-lg font-bold text-brand-emerald" id="crop-count">0</div>
-                            </div>
-                        </div>
-
-                        <div class="mt-2">
-                            <div class="text-[10px] text-slate-400 uppercase font-mono mb-2">Live Face Crops:</div>
-                            <div id="debug-crops" class="flex flex-wrap gap-2 min-h-[60px] bg-black/40 p-2 rounded-lg border border-white/5">
-                                <div class="text-xs text-slate-600 italic font-mono">Awaiting face...</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="bg-black/50 rounded-xl p-4 border border-white/10 flex-1 flex flex-col">
-                        <div class="text-xs font-mono uppercase text-slate-400 font-bold mb-2">Live Test Feed Status</div>
-                        <div class="text-xs font-mono text-slate-400 leading-relaxed">
-                            Frames from this tester are processed locally on the AI pipeline for verification demonstration without flooding server frame archives.
-                        </div>
-                    </div>
-                </div>
+            <div class="aspect-video w-full rounded-2xl overflow-hidden bg-slate-900 flex items-center justify-center">
+                <img id="lightbox-img" src="" alt="Raw Frame Full" class="w-full h-full object-contain">
             </div>
         </div>
     </div>
 
-    <!-- Header -->
-    <header class="glass-panel sticky top-0 z-50 border-b border-white/5 py-3 px-6 flex flex-wrap justify-between items-center gap-4">
-        <div class="flex items-center gap-4">
-            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-brand-cyan to-brand-emerald flex items-center justify-center shadow-[0_0_15px_rgba(0,210,255,0.5)]">
-                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
-            </div>
-            <div>
-                <h1 class="text-lg font-bold tracking-wider text-white">NEXUS<span class="text-brand-cyan">.AI</span></h1>
-                <p class="text-[10px] uppercase tracking-[0.2em] text-brand-emerald font-mono">Central Edge Command Center</p>
-            </div>
-        </div>
-
-        <!-- Center Tabs Selector -->
-        <div class="flex items-center bg-black/60 p-1 rounded-xl border border-white/10">
-            <button id="tab-dashboard-btn" class="px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/40 shadow-[0_0_10px_rgba(0,210,255,0.2)]">
-                🏛️ Main Command Hub
-            </button>
-            <button id="tab-devices-btn" class="px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5">
-                <span>📡 Currently Running (Edge Pis)</span>
-                <span id="active-devices-badge" class="bg-brand-emerald/20 text-brand-emerald px-1.5 py-0.2 rounded text-[10px] font-bold border border-brand-emerald/40">0</span>
-            </button>
-        </div>
-        
-        <div class="flex flex-wrap items-center gap-3">
-            <!-- WebSocket Status -->
-            <div class="flex items-center gap-2 bg-black/40 px-3 py-1.5 rounded-lg border border-white/5">
-                <span class="relative flex h-2.5 w-2.5">
-                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-emerald opacity-75"></span>
-                  <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-brand-emerald"></span>
-                </span>
-                <span id="ws-status" class="text-xs font-mono text-brand-emerald tracking-wide">SYSTEM READY</span>
-            </div>
-
-            <!-- Demo Tester Trigger -->
-            <button id="open-demo-btn" class="bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/40 px-3 py-2 rounded-lg text-xs font-bold font-mono tracking-wide transition-all shadow-[0_0_10px_rgba(168,85,247,0.2)]">
-                🧪 WEBCAM DEMO
-            </button>
-
-            <!-- Register Student Button -->
-            <button id="add-student-btn" class="bg-brand-cyan/20 hover:bg-brand-cyan/30 text-brand-cyan border border-brand-cyan/50 px-4 py-2 rounded-lg text-xs font-bold tracking-wide transition-all duration-300 shadow-[0_0_10px_rgba(0,210,255,0.2)] hover:shadow-[0_0_20px_rgba(0,210,255,0.4)]">
-                + REGISTER STUDENT
-            </button>
-
-            <!-- Export Logs -->
-            <button id="download-btn" class="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-[0_0_10px_rgba(59,130,246,0.2)]">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                EXPORT LOGS
-            </button>
-
-            <!-- Clear Raw Frame Cache -->
-            <button id="clear-cache-btn" class="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 px-3 py-2 rounded-lg text-xs font-bold transition-all" title="Wipe stored test frames">
-                🧹 CLEAR CACHE
-            </button>
-
-            <!-- Reset Button -->
-            <button id="delete-all-btn" class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 px-3 py-2 rounded-lg text-xs font-bold transition-all">
-                WIPE DB
-            </button>
-
-            <!-- Teacher Info & Logout -->
-            <div class="flex items-center gap-2 pl-2 border-l border-white/10">
-                <span class="text-xs text-slate-400 font-mono hidden md:inline">{{ teacher_email }}</span>
-                <a href="/logout" onclick="localStorage.removeItem('nexus_auth_token');" class="bg-white/5 hover:bg-white/10 text-slate-300 px-3 py-2 rounded-lg text-xs font-bold transition-all border border-white/10 flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
-                    LOGOUT
-                </a>
-            </div>
-        </div>
-    </header>
-
-    <!-- TEACHER SESSION CONTROL BAR -->
-    <div class="bg-gradient-to-r from-black via-slate-900/90 to-black border-b border-brand-cyan/20 px-6 py-3.5 flex flex-wrap items-center justify-between gap-4 shadow-lg">
-        <div class="flex items-center gap-3">
-            <div class="p-2 rounded-lg bg-brand-cyan/10 border border-brand-cyan/30 text-brand-cyan">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-            </div>
-            <div>
-                <div class="text-xs uppercase tracking-wider text-slate-400 font-mono">Class Monitoring Session (Raspberry Pi Edge Trigger)</div>
-                <div id="session-state-text" class="text-sm font-bold text-white flex items-center gap-2 font-mono">
-                    <span class="inline-block w-2 h-2 rounded-full bg-slate-500" id="session-indicator"></span>
-                    <span id="session-status-label">STANDBY / NOT STARTED</span>
-                </div>
-            </div>
-        </div>
-
-        <!-- Session Controls -->
-        <div class="flex flex-wrap items-center gap-3">
-            <div class="flex items-center gap-2 bg-black/60 px-3 py-1.5 rounded-lg border border-white/10" id="duration-selector-box">
-                <label for="session-duration-select" class="text-xs font-mono text-slate-400 uppercase">Duration:</label>
-                <select id="session-duration-select" class="bg-transparent text-brand-cyan font-mono text-xs font-bold focus:outline-none cursor-pointer">
-                    <option value="50" class="bg-slate-900 text-white" selected>50 Minutes (Default)</option>
-                    <option value="40" class="bg-slate-900 text-white">40 Minutes</option>
-                    <option value="30" class="bg-slate-900 text-white">30 Minutes</option>
-                    <option value="60" class="bg-slate-900 text-white">60 Minutes</option>
-                    <option value="2" class="bg-slate-900 text-white">2 Minutes (Quick Demo)</option>
-                </select>
-            </div>
-
-            <button id="start-session-btn" class="bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white px-5 py-2 rounded-lg text-xs font-bold font-mono tracking-wider transition-all duration-300 shadow-[0_0_15px_rgba(16,185,129,0.3)] hover:shadow-[0_0_25px_rgba(16,185,129,0.5)] flex items-center gap-2">
-                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"></path></svg>
-                START MONITORING
-            </button>
-
-            <button id="stop-session-btn" class="hidden bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white px-5 py-2 rounded-lg text-xs font-bold font-mono tracking-wider transition-all duration-300 shadow-[0_0_15px_rgba(239,68,68,0.4)] flex items-center gap-2">
-                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd"></path></svg>
-                STOP & DISPATCH REPORT
-            </button>
-
-            <div id="session-timer-box" class="hidden flex items-center gap-2 bg-black/80 px-4 py-1.5 rounded-lg border border-brand-cyan/40 shadow-[0_0_10px_rgba(0,210,255,0.2)]">
-                <span class="text-[10px] text-brand-cyan uppercase font-mono tracking-widest">Time Remaining:</span>
-                <span id="session-timer-display" class="text-base font-mono font-black text-white tracking-widest">50:00</span>
-            </div>
-        </div>
-    </div>
-
-    <!-- VIEW 1: ENTERPRISE COMMAND HUB (DEFAULT CLEAN VIEW) -->
-    <div id="view-dashboard" class="flex-1 p-6 flex flex-col gap-6 max-w-[1600px] mx-auto w-full animate-slideIn">
-        
-        <!-- Metrics Cards -->
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div class="glass-panel glass-border-gradient rounded-xl p-4 flex items-center justify-between">
-                <div>
-                    <div class="text-xs font-mono text-slate-400 uppercase">Session Attendance</div>
-                    <div class="text-3xl font-bold font-mono text-brand-emerald" id="session-present-count">0</div>
-                </div>
-                <div class="p-3 rounded-lg bg-emerald-500/10 text-brand-emerald border border-emerald-500/20">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138z"></path></svg>
-                </div>
-            </div>
-
-            <div class="glass-panel glass-border-gradient rounded-xl p-4 flex items-center justify-between">
-                <div>
-                    <div class="text-xs font-mono text-slate-400 uppercase">Active Raspberry Pis</div>
-                    <div class="text-3xl font-bold font-mono text-brand-cyan" id="stat-active-pis">0</div>
-                </div>
-                <div class="p-3 rounded-lg bg-brand-cyan/10 text-brand-cyan border border-brand-cyan/20">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
-                </div>
-            </div>
-
-            <div class="glass-panel glass-border-gradient rounded-xl p-4 flex items-center justify-between">
-                <div>
-                    <div class="text-xs font-mono text-slate-400 uppercase">Session Status</div>
-                    <div class="text-base font-bold font-mono text-white" id="stat-session-status">STANDBY</div>
-                </div>
-                <div class="p-3 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                </div>
-            </div>
-
-            <div class="glass-panel glass-border-gradient rounded-xl p-4 flex items-center justify-between">
-                <div>
-                    <div class="text-xs font-mono text-slate-400 uppercase">Report Dispatch</div>
-                    <div class="text-xs font-bold font-mono text-emerald-400">shashankdubey822@gmail.com</div>
-                </div>
-                <div class="p-3 rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
-                </div>
-            </div>
-        </div>
-
-        <!-- Main Dashboard Split Grid -->
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
-            <div class="lg:col-span-8 flex flex-col gap-4">
-                <div class="glass-panel glass-border-gradient rounded-xl p-5 flex-1 flex flex-col min-h-[480px]">
-                    <div class="flex justify-between items-center border-b border-white/10 pb-4 mb-4">
-                        <div class="flex items-center gap-2">
-                            <svg class="w-5 h-5 text-brand-emerald" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138z"></path></svg>
-                            <h3 class="text-base font-bold text-white font-mono">Live Session Attendance Ledger</h3>
-                        </div>
-                        <span class="text-xs font-mono text-slate-400" id="ledger-session-id-label">Session: Not Started</span>
-                    </div>
-
-                    <div id="confirmed-list" class="flex-1 overflow-y-auto flex flex-col gap-3 pr-2 max-h-[500px]">
-                        <div class="text-center text-slate-500/50 mt-20 text-sm font-mono tracking-widest">
-                            AWAITING ATTENDANCE (START A SESSION ON DASHBOARD OR RASPBERRY PI)
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="lg:col-span-4 flex flex-col gap-6">
-                <div class="glass-panel glass-border-gradient rounded-xl p-5 flex-1 flex flex-col min-h-[480px]">
-                    <h3 class="text-xs uppercase tracking-widest text-slate-400 font-mono mb-4 flex items-center gap-2">
-                        <svg class="w-4 h-4 text-brand-emerald" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                        Audit Event Log
-                    </h3>
-                    <div id="terminal-logs" class="bg-black/60 flex-1 rounded-lg border border-white/10 p-3 font-mono text-xs overflow-y-auto flex flex-col gap-1 tracking-wider shadow-inner max-h-[440px]">
-                        <div class="text-brand-cyan/70">NEXUS OS v3.4 Ready — FIFO AI Inspection Active</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- VIEW 2: CURRENTLY RUNNING DEVICES & TRIPLE DETAIL PANEL -->
-    <div id="view-devices" class="hidden flex-1 p-6 flex flex-col gap-6 max-w-[1600px] mx-auto w-full animate-slideIn">
-        
-        <!-- Devices Banner -->
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div class="glass-panel glass-border-gradient rounded-xl p-4 flex items-center justify-between">
-                <div>
-                    <div class="text-xs font-mono text-slate-400 uppercase">Total Classrooms / Nodes</div>
-                    <div class="text-2xl font-bold font-mono text-white" id="stat-total-devices">0</div>
-                </div>
-                <div class="p-3 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
-                </div>
-            </div>
-            
-            <div class="glass-panel glass-border-gradient rounded-xl p-4 flex items-center justify-between">
-                <div>
-                    <div class="text-xs font-mono text-slate-400 uppercase">Active Streaming</div>
-                    <div class="text-2xl font-bold font-mono text-brand-emerald" id="stat-active-devices">0</div>
-                </div>
-                <div class="p-3 rounded-lg bg-brand-emerald/10 text-brand-emerald border border-brand-emerald/20">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-                </div>
-            </div>
-
-            <div class="glass-panel glass-border-gradient rounded-xl p-4 flex items-center justify-between">
-                <div>
-                    <div class="text-xs font-mono text-slate-400 uppercase">Standby / Stopped</div>
-                    <div class="text-2xl font-bold font-mono text-slate-400" id="stat-standby-devices">0</div>
-                </div>
-                <div class="p-3 rounded-lg bg-slate-500/10 text-slate-400 border border-slate-500/20">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                </div>
-            </div>
-
-            <div class="glass-panel glass-border-gradient rounded-xl p-4 flex items-center justify-between">
-                <div>
-                    <div class="text-xs font-mono text-slate-400 uppercase">Total Raw Frames Captured</div>
-                    <div class="text-2xl font-bold font-mono text-brand-cyan" id="stat-total-frames">0</div>
-                </div>
-                <div class="p-3 rounded-lg bg-brand-cyan/10 text-brand-cyan border border-brand-cyan/20">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                </div>
-            </div>
-        </div>
-
-        <!-- Devices & Triple-Tab Panel -->
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
-            <div class="lg:col-span-4 flex flex-col gap-4">
-                <div class="glass-panel glass-border-gradient rounded-xl p-4 flex justify-between items-center">
-                    <h3 class="font-bold text-white font-mono text-sm flex items-center gap-2">
-                        <svg class="w-4 h-4 text-brand-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
-                        Registered Edge Nodes
-                    </h3>
-                    <div class="flex items-center gap-1 bg-black/50 p-1 rounded-lg border border-white/10 text-[11px] font-mono">
-                        <button id="filter-all-devices-btn" class="px-2 py-0.5 rounded bg-brand-cyan/20 text-brand-cyan font-bold">ALL</button>
-                        <button id="filter-active-devices-btn" class="px-2 py-0.5 rounded text-slate-400 hover:text-white">ACTIVE</button>
-                        <button id="filter-stopped-devices-btn" class="px-2 py-0.5 rounded text-slate-400 hover:text-white">STOPPED</button>
-                    </div>
-                </div>
-
-                <div id="devices-cards-list" class="flex flex-col gap-3 overflow-y-auto max-h-[600px] pr-1">
-                    <!-- Populated dynamically via JS -->
-                </div>
-            </div>
-
-            <div class="lg:col-span-8 flex flex-col gap-4">
-                <div class="glass-panel glass-border-gradient rounded-xl p-5 flex-1 flex flex-col min-h-[500px]">
-                    <div class="border-b border-white/10 pb-4 mb-4 flex flex-wrap justify-between items-center gap-3">
-                        <div>
-                            <div class="flex items-center gap-2">
-                                <span class="w-3 h-3 rounded-full bg-brand-emerald" id="selected-device-indicator"></span>
-                                <h3 class="text-base font-bold text-white font-mono" id="selected-device-name">Select a Device</h3>
-                            </div>
-                            <p class="text-xs text-slate-400 font-mono mt-1" id="selected-device-submeta">IP: -- | Registered: --</p>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <span class="text-xs font-mono text-brand-cyan bg-brand-cyan/10 px-3 py-1 rounded-lg border border-brand-cyan/30" id="selected-device-status-badge">STANDBY</span>
-                        </div>
-                    </div>
-
-                    <!-- Triple Tabs Inside Device View -->
-                    <div class="flex items-center gap-2 mb-4 border-b border-white/10 pb-2 overflow-x-auto">
-                        <button id="dev-tab-students-btn" class="px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-brand-emerald/20 text-brand-emerald border border-brand-emerald/40 transition-all flex items-center gap-1.5 whitespace-nowrap">
-                            🎓 Verified Students (Name + Roll)
-                        </button>
-                        <button id="dev-tab-queue-btn" class="px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap">
-                            ✂️ Live Cropped Faces & AWS Queue (FIFO)
-                        </button>
-                        <button id="dev-tab-frames-btn" class="px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap">
-                            📸 Raw Uncropped Frames
-                        </button>
-                    </div>
-
-                    <!-- Panel A: Verified Students from this Device -->
-                    <div id="dev-panel-students" class="flex-1 overflow-y-auto max-h-[440px] flex flex-col gap-2.5">
-                        <div class="text-center text-slate-500 py-16 font-mono text-xs">
-                            No students verified from this specific camera node yet.
-                        </div>
-                    </div>
-
-                    <!-- Panel B: Live Cropped Faces & AWS FIFO Queue -->
-                    <div id="dev-panel-queue" class="hidden flex-1 overflow-y-auto max-h-[440px] flex flex-col gap-2.5">
-                        <div class="text-center text-slate-500 py-16 font-mono text-xs">
-                            No cropped faces currently in FIFO pipeline for this device.
-                        </div>
-                    </div>
-
-                    <!-- Panel C: Raw Frames Gallery -->
-                    <div id="dev-panel-frames" class="hidden flex-1 grid grid-cols-2 sm:grid-cols-3 gap-3 overflow-y-auto max-h-[440px] p-2 bg-black/40 rounded-xl border border-white/5">
-                        <div class="col-span-full text-center text-slate-500 py-16 font-mono text-xs">
-                            No raw frames captured for this device yet.
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Student Registration Modal -->
-    <div id="modal-backdrop" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center z-[4000] transition-all duration-300">
-        <div class="glass-panel glass-border-gradient rounded-2xl p-8 max-w-md w-full shadow-2xl transform scale-100 transition-all">
-            <h2 class="text-2xl font-bold text-white mb-2 tracking-wide">Register Student</h2>
-            <p class="text-sm text-slate-400 mb-6">Enter student identity and roll number to initiate 3D vector scan.</p>
-            
-            <div class="flex flex-col gap-4 mb-6">
-                <div>
-                    <label for="student-name-input" class="block text-xs uppercase font-mono text-slate-400 mb-1.5">Student Full Name</label>
-                    <input type="text" id="student-name-input" placeholder="e.g. Shashank Dubey" 
-                        class="w-full bg-black/50 border border-brand-cyan/30 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-brand-cyan focus:ring-1 focus:ring-brand-cyan transition-all">
-                </div>
-                
-                <div>
-                    <label for="student-roll-input" class="block text-xs uppercase font-mono text-slate-400 mb-1.5">Roll Number / Student ID</label>
-                    <input type="text" id="student-roll-input" placeholder="e.g. 24" 
-                        class="w-full bg-black/50 border border-brand-cyan/30 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-brand-cyan focus:ring-1 focus:ring-brand-cyan transition-all">
-                </div>
-            </div>
-            
-            <div class="flex justify-end gap-3">
-                <button id="cancel-btn" class="px-5 py-2.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/5 transition-all font-semibold text-sm">Cancel</button>
-                <button id="start-scan-btn" class="bg-gradient-to-r from-brand-cyan to-blue-600 hover:from-brand-cyan hover:to-blue-500 text-white px-6 py-2.5 rounded-lg font-bold text-sm shadow-[0_0_15px_rgba(0,210,255,0.4)] transition-all transform hover:scale-105">Initiate 3D Scan</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Registration 3D Overlay HUD -->
-    <div id="reg-overlay" class="fixed inset-0 bg-black/90 backdrop-blur-md hidden flex flex-col items-center justify-center z-[4500]">
-        <h2 id="reg-instruction" class="text-3xl font-mono text-brand-cyan font-bold tracking-widest mb-2">INITIALIZING 3D SCAN</h2>
-        <p id="reg-subtext" class="text-slate-400 font-mono uppercase tracking-widest text-sm animate-pulse">Align face within camera target vector...</p>
-        <div class="w-64 bg-slate-800 rounded-full h-2.5 mt-4 overflow-hidden border border-white/10">
-            <div id="reg-progress-bar" class="bg-brand-cyan h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
-        </div>
-    </div>
-
-    <!-- Core App Logic -->
+    <!-- Main Logic Script -->
     <script src="/static/app.js"></script>
 </body>
 </html>

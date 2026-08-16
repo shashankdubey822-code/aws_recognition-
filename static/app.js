@@ -5,8 +5,6 @@ const overlayCanvas = document.getElementById('overlayCanvas');
 const overlayCtx = overlayCanvas.getContext('2d');
 const confirmedList = document.getElementById('confirmed-list');
 const terminalLogs = document.getElementById('terminal-logs');
-const debugCrops = document.getElementById('debug-crops');
-const cropCount = document.getElementById('crop-count');
 const cameraSelect = document.getElementById('camera-select');
 const fpsCounter = document.getElementById('fps-counter');
 
@@ -78,7 +76,6 @@ const clearCacheBtn = document.getElementById('clear-cache-btn');
 let ws;
 let isProcessing = false;
 let currentStream = null;
-let isFrontCamera = true;
 let isDemoRunning = false;
 let availableCameras = [];
 let frameCount = 0;
@@ -102,10 +99,6 @@ let sessionRemainingSeconds = 0;
 let isRegistering = false;
 let regProgress = 0;
 
-// --- ADVANCED TRACKING STATE ---
-let trackedFaces = {}; 
-const LERP_FACTOR = 0.3; 
-
 // --- TOAST NOTIFICATIONS ---
 function showToast(message, type = 'info') {
     const container = document.getElementById('toast-container');
@@ -123,8 +116,8 @@ function showToast(message, type = 'info') {
     toast.innerHTML = `
         <div class="text-xl">${icon}</div>
         <div class="flex-1">
-            <h4 class="text-xs font-bold capitalize text-white font-mono">${type.toUpperCase()}</h4>
-            <p class="text-xs text-slate-300 font-sans">${message}</p>
+            <h4 class="text-xs font-bold uppercase text-slate-900 font-mono">${type}</h4>
+            <p class="text-xs text-slate-600 font-sans">${message}</p>
         </div>
     `;
     
@@ -139,11 +132,11 @@ function showToast(message, type = 'info') {
 function logToTerminal(msg, type = 'info') {
     if (!terminalLogs) return;
     const div = document.createElement('div');
-    const time = new Date().toISOString().split('T')[1].slice(0, 8);
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
     
     let colorClass = 'text-slate-300';
     let prefix = '[-]';
-    if (type === 'error' || msg.includes('ERROR') || msg.includes('Conflict')) { colorClass = 'text-red-400 font-bold'; prefix = '[!]'; }
+    if (type === 'error' || msg.includes('ERROR') || msg.includes('Conflict')) { colorClass = 'text-rose-400 font-bold'; prefix = '[!]'; }
     else if (type === 'warning' || msg.includes('WARNING')) { colorClass = 'text-amber-300 font-bold'; prefix = '[?]'; }
     else if (type === 'success' || msg.includes('Granted') || msg.includes('Approved') || msg.includes('Active')) { colorClass = 'text-emerald-400 font-bold'; prefix = '[+]'; }
     
@@ -158,18 +151,18 @@ function logToTerminal(msg, type = 'info') {
     }
 }
 
-// --- TOP TABS SWITCHER ---
+// --- TOP TABS SWITCHER (LIGHT GLASS) ---
 if (tabDashboardBtn && tabDevicesBtn) {
     tabDashboardBtn.addEventListener('click', () => {
-        tabDashboardBtn.className = "px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/40 shadow-[0_0_10px_rgba(0,210,255,0.2)]";
-        tabDevicesBtn.className = "px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5";
+        tabDashboardBtn.className = "px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-white text-sky-700 shadow-sm border border-slate-200/80";
+        tabDevicesBtn.className = "px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5";
         viewDashboard.classList.remove('hidden');
         viewDevices.classList.add('hidden');
     });
 
     tabDevicesBtn.addEventListener('click', () => {
-        tabDevicesBtn.className = "px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/40 shadow-[0_0_10px_rgba(0,210,255,0.2)] flex items-center gap-1.5";
-        tabDashboardBtn.className = "px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all";
+        tabDevicesBtn.className = "px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-white text-sky-700 shadow-sm border border-slate-200/80 flex items-center gap-1.5";
+        tabDashboardBtn.className = "px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all";
         viewDevices.classList.remove('hidden');
         viewDashboard.classList.add('hidden');
         renderDevicesView();
@@ -243,7 +236,7 @@ function renderDevicesView() {
     devicesCardsList.innerHTML = '';
     
     if (devices.length === 0) {
-        devicesCardsList.innerHTML = '<div class="text-center text-slate-500 py-10 font-mono text-xs">No registered edge devices connected.</div>';
+        devicesCardsList.innerHTML = '<div class="text-center text-slate-400 py-10 font-mono text-xs">No registered edge devices connected.</div>';
         return;
     }
 
@@ -252,10 +245,10 @@ function renderDevicesView() {
         const isActive = dev.status === 'active';
         const card = document.createElement('div');
         
-        card.className = `p-4 rounded-xl border transition-all cursor-pointer flex flex-col gap-2 ${
+        card.className = `p-4 rounded-2xl border transition-all cursor-pointer flex flex-col gap-2 ${
             isSelected 
-                ? 'bg-brand-cyan/15 border-brand-cyan shadow-[0_0_15px_rgba(0,210,255,0.25)]' 
-                : 'bg-black/60 border-white/10 hover:border-brand-cyan/40 hover:bg-black/80'
+                ? 'bg-sky-50/90 border-sky-400 shadow-md ring-2 ring-sky-300/30' 
+                : 'bg-white/80 border-slate-200 hover:border-sky-300 hover:bg-white shadow-sm'
         }`;
         
         card.onclick = () => {
@@ -268,32 +261,32 @@ function renderDevicesView() {
         let stageBadge = '';
 
         if (stage === 'CROPPING') {
-            stageBadge = '<span class="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 animate-pulse">✂️ AI CROPPING</span>';
+            stageBadge = '<span class="text-[9px] font-mono px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 font-bold animate-pulse">✂️ AI CROPPING</span>';
         } else if (stage === 'AWS_MATCHING') {
-            stageBadge = '<span class="text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 animate-pulse">🔄 AWS SCANNING</span>';
+            stageBadge = '<span class="text-[9px] font-mono px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 font-bold animate-pulse">🔄 AWS SCANNING</span>';
         }
 
         card.innerHTML = `
             <div class="flex justify-between items-start">
                 <div class="flex items-center gap-2.5">
-                    <span class="w-2.5 h-2.5 rounded-full ${isActive ? 'bg-brand-emerald animate-ping' : 'bg-slate-500'}"></span>
-                    <h4 class="font-bold text-white font-mono text-xs">${dev.device_name}</h4>
+                    <span class="w-2.5 h-2.5 rounded-full ${isActive ? 'bg-emerald-500 animate-ping' : 'bg-slate-400'}"></span>
+                    <h4 class="font-bold text-slate-900 font-mono text-xs">${dev.device_name}</h4>
                 </div>
                 <div class="flex items-center gap-1.5">
                     ${stageBadge}
-                    <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
+                    <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
                         isActive 
-                            ? 'bg-brand-emerald/20 text-brand-emerald border-brand-emerald/40' 
-                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                            : 'bg-slate-100 text-slate-600 border-slate-200'
                     }">
                         ${isActive ? 'ACTIVE' : 'STANDBY'}
                     </span>
                 </div>
             </div>
-            <div class="grid grid-cols-3 gap-2 text-[11px] font-mono text-slate-400 mt-1 pt-2 border-t border-white/5">
-                <div><span class="text-slate-500">IP:</span> ${dev.client_ip || '127.0.0.1'}</div>
-                <div><span class="text-slate-500">Students:</span> ${studentsCount}</div>
-                <div class="text-right"><span class="text-slate-500">Frames:</span> ${dev.total_frames || 0}</div>
+            <div class="grid grid-cols-3 gap-2 text-[11px] font-mono text-slate-600 mt-1 pt-2 border-t border-slate-200/80">
+                <div><span class="text-slate-400">IP:</span> ${dev.client_ip || '127.0.0.1'}</div>
+                <div><span class="text-slate-400">Students:</span> <strong class="text-slate-900">${studentsCount}</strong></div>
+                <div class="text-right"><span class="text-slate-400">Frames:</span> ${dev.total_frames || 0}</div>
                 <div class="col-span-3 text-[10px] text-slate-500 truncate">Last Active: ${dev.last_seen || 'N/A'}</div>
             </div>
         `;
@@ -314,20 +307,20 @@ function renderSelectedDeviceDetails() {
     if (selectedDeviceStatusBadge) {
         if (dev.stage === 'CROPPING') {
             selectedDeviceStatusBadge.textContent = '✂️ LOCAL AI EXTRACTING FACES...';
-            selectedDeviceStatusBadge.className = 'text-xs font-mono text-purple-400 bg-purple-500/10 px-3 py-1 rounded-lg border border-purple-500/30 animate-pulse';
+            selectedDeviceStatusBadge.className = 'text-xs font-mono font-bold text-purple-700 bg-purple-50 px-3 py-1 rounded-xl border border-purple-200 animate-pulse';
         } else if (dev.stage === 'AWS_MATCHING') {
             selectedDeviceStatusBadge.textContent = '🔄 CONTACTING AWS REKOGNITION...';
-            selectedDeviceStatusBadge.className = 'text-xs font-mono text-cyan-400 bg-cyan-500/10 px-3 py-1 rounded-lg border border-cyan-500/30 animate-pulse';
+            selectedDeviceStatusBadge.className = 'text-xs font-mono font-bold text-sky-700 bg-sky-50 px-3 py-1 rounded-xl border border-sky-200 animate-pulse';
         } else {
             selectedDeviceStatusBadge.textContent = dev.status === 'active' ? 'STREAMING ACTIVE' : 'STANDBY / IDLE';
             selectedDeviceStatusBadge.className = dev.status === 'active' 
-                ? 'text-xs font-mono text-brand-emerald bg-brand-emerald/10 px-3 py-1 rounded-lg border border-brand-emerald/30'
-                : 'text-xs font-mono text-slate-400 bg-slate-800 px-3 py-1 rounded-lg border border-slate-700';
+                ? 'text-xs font-mono font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-xl border border-emerald-200'
+                : 'text-xs font-mono font-bold text-slate-600 bg-slate-100 px-3 py-1 rounded-xl border border-slate-200';
         }
     }
     
     if (selectedDeviceIndicator) {
-        selectedDeviceIndicator.className = `w-3 h-3 rounded-full ${dev.status === 'active' ? 'bg-brand-emerald animate-ping' : 'bg-slate-500'}`;
+        selectedDeviceIndicator.className = `w-3 h-3 rounded-full ${dev.status === 'active' ? 'bg-emerald-500 animate-ping' : 'bg-slate-400'}`;
     }
 
     // Panel A: Verified Students
@@ -336,26 +329,26 @@ function renderSelectedDeviceDetails() {
         const students = dev.verified_students || [];
         
         if (students.length === 0) {
-            devPanelStudents.innerHTML = '<div class="text-center text-slate-500 py-16 font-mono text-xs">No students verified from this specific camera node yet.</div>';
+            devPanelStudents.innerHTML = '<div class="text-center text-slate-400 py-16 font-mono text-xs">No students verified from this specific camera node yet.</div>';
         } else {
             students.forEach((st, idx) => {
                 const item = document.createElement('div');
-                item.className = 'bg-black/60 p-3 rounded-xl border border-brand-emerald/30 flex justify-between items-center animate-slideIn';
+                item.className = 'glass-panel p-3.5 rounded-2xl flex justify-between items-center animate-slideIn shadow-sm';
                 item.innerHTML = `
                     <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-lg bg-brand-emerald/20 text-brand-emerald flex items-center justify-center text-xs font-bold font-mono border border-brand-emerald/40">
+                        <div class="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold font-mono border border-emerald-200">
                             #${String(idx + 1).padStart(2, '0')}
                         </div>
                         <div>
-                            <div class="font-bold text-white font-mono text-xs">${st.name}</div>
-                            <div class="text-[10px] text-brand-cyan font-mono font-bold">Roll Number: ${st.roll_number || 'N/A'}</div>
+                            <div class="font-bold text-slate-900 font-mono text-xs">${st.name}</div>
+                            <div class="text-[10px] text-sky-700 font-mono font-bold">Roll Number: ${st.roll_number || 'N/A'}</div>
                         </div>
                     </div>
                     <div class="flex items-center gap-3">
-                        <span class="text-[10px] text-brand-emerald font-mono bg-brand-emerald/10 px-2 py-1 rounded border border-brand-emerald/30">
+                        <span class="text-[10px] text-emerald-700 font-mono font-bold bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
                             ${st.time} ✓
                         </span>
-                        ${st.photo ? `<img src="${st.photo}" class="w-8 h-8 object-cover rounded-lg border border-white/20">` : ''}
+                        ${st.photo ? `<img src="${st.photo}" class="w-8 h-8 object-cover rounded-xl border border-slate-200 shadow-sm">` : ''}
                     </div>
                 `;
                 devPanelStudents.appendChild(item);
@@ -369,51 +362,47 @@ function renderSelectedDeviceDetails() {
         const queue = dev.cropped_queue || [];
 
         if (queue.length === 0) {
-            devPanelQueue.innerHTML = '<div class="text-center text-slate-500 py-16 font-mono text-xs">No cropped faces currently in FIFO pipeline for this device.</div>';
+            devPanelQueue.innerHTML = '<div class="text-center text-slate-400 py-16 font-mono text-xs">No cropped faces currently in FIFO pipeline for this device.</div>';
         } else {
             queue.forEach((item, idx) => {
-                let badgeClass = 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+                let badgeClass = 'bg-sky-50 text-sky-700 border-sky-200';
                 let statusIcon = '⏳';
                 let statusText = 'IN FIFO QUEUE';
 
                 if (item.status === 'match') {
-                    badgeClass = 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 font-bold';
+                    badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200 font-bold';
                     statusIcon = '✅';
                     statusText = `MATCH APPROVED (${item.score || 100}%)`;
                 } else if (item.status === 'no_match') {
-                    badgeClass = 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+                    badgeClass = 'bg-amber-50 text-amber-700 border-amber-200';
                     statusIcon = '❌';
                     statusText = 'NO MATCH IN DB';
-                } else if (item.status === 'spoof') {
-                    badgeClass = 'bg-red-500/20 text-red-400 border-red-500/30 font-bold';
-                    statusIcon = '🛑';
-                    statusText = 'SPOOF BLOCKED';
                 } else if (item.status === 'scanning') {
-                    badgeClass = 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30 animate-pulse';
+                    badgeClass = 'bg-sky-50 text-sky-700 border-sky-200 font-bold animate-pulse';
                     statusIcon = '🔄';
                     statusText = 'AWS SCANNING...';
                 }
 
                 const card = document.createElement('div');
-                card.className = 'bg-black/60 p-3 rounded-xl border border-white/10 flex items-center justify-between gap-3 animate-slideIn';
+                card.className = 'glass-panel p-3.5 rounded-2xl flex items-center justify-between gap-3 animate-slideIn shadow-sm';
                 card.innerHTML = `
                     <div class="flex items-center gap-3">
-                        <div class="relative w-12 h-12 rounded-lg overflow-hidden border border-white/20 bg-black flex-shrink-0">
+                        <div class="relative w-12 h-12 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 flex-shrink-0 shadow-sm">
                             ${item.crop ? `<img src="${item.crop}" class="w-full h-full object-cover">` : '<div class="w-full h-full flex items-center justify-center text-xs">👤</div>'}
                         </div>
                         <div>
-                            <div class="font-bold text-white font-mono text-xs flex items-center gap-2">
+                            <div class="font-bold text-slate-900 font-mono text-xs flex items-center gap-2">
                                 <span>${item.name || 'Cropped Face'}</span>
-                                ${item.roll_number && item.roll_number !== 'N/A' ? `<span class="text-[10px] text-brand-cyan font-normal font-mono">[Roll: ${item.roll_number}]</span>` : ''}
+                                ${item.roll_number && item.roll_number !== 'N/A' ? `<span class="text-[10px] text-sky-700 font-normal font-mono">[Roll: ${item.roll_number}]</span>` : ''}
                             </div>
-                            <div class="text-[11px] font-mono text-slate-400 mt-0.5">${item.result || 'Processing via AWS Rekognition...'}</div>
+                            <div class="text-[11px] font-mono text-slate-500 mt-0.5">${item.result || 'Processing via AWS Rekognition...'}</div>
                         </div>
                     </div>
                     <div class="flex flex-col items-end gap-1 flex-shrink-0">
-                        <span class="text-[10px] font-mono px-2 py-0.5 rounded border ${badgeClass}">
+                        <span class="text-[10px] font-mono px-2.5 py-0.5 rounded-full border ${badgeClass}">
                             ${statusIcon} ${statusText}
                         </span>
-                        <span class="text-[9px] font-mono text-slate-500">${item.time}</span>
+                        <span class="text-[9px] font-mono text-slate-400">${item.time}</span>
                     </div>
                 `;
                 devPanelQueue.appendChild(card);
@@ -427,16 +416,16 @@ function renderSelectedDeviceDetails() {
         const frames = dev.raw_frames || [];
         
         if (frames.length === 0) {
-            devPanelFrames.innerHTML = '<div class="col-span-full text-center text-slate-500 py-16 font-mono text-xs">No raw frames captured for this device yet.</div>';
+            devPanelFrames.innerHTML = '<div class="col-span-full text-center text-slate-400 py-16 font-mono text-xs">No raw frames captured for this device yet.</div>';
         } else {
             frames.forEach((frm, idx) => {
                 const item = document.createElement('div');
-                item.className = 'group relative aspect-video bg-black rounded-lg overflow-hidden border border-white/10 hover:border-brand-cyan transition-all cursor-pointer shadow-md';
+                item.className = 'group relative aspect-video bg-slate-900 rounded-2xl overflow-hidden border border-slate-200 hover:border-sky-500 transition-all cursor-pointer shadow-md';
                 item.onclick = () => openLightbox(frm.url, dev.device_name, frm.timestamp, frm.ip || dev.client_ip);
                 item.innerHTML = `
                     <img src="${frm.url}" alt="Raw Frame" class="w-full h-full object-cover group-hover:scale-105 transition-all duration-300">
-                    <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-2 flex flex-col justify-between">
-                        <span class="text-[9px] font-mono text-brand-cyan self-end bg-black/60 px-1.5 py-0.5 rounded">🔍 ZOOM</span>
+                    <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-3 flex flex-col justify-between">
+                        <span class="text-[9px] font-mono text-sky-300 self-end bg-black/60 px-2 py-0.5 rounded-full backdrop-blur-sm">🔍 ZOOM</span>
                         <div class="text-[10px] font-mono text-white">${frm.timestamp}</div>
                     </div>
                 `;
@@ -450,9 +439,9 @@ function renderSelectedDeviceDetails() {
 if (devTabStudentsBtn && devTabQueueBtn && devTabFramesBtn) {
     devTabStudentsBtn.onclick = () => {
         currentDevTab = 'STUDENTS';
-        devTabStudentsBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-brand-emerald/20 text-brand-emerald border border-brand-emerald/40 transition-all flex items-center gap-1.5 whitespace-nowrap";
-        devTabQueueBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap";
-        devTabFramesBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap";
+        devTabStudentsBtn.className = "px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 transition-all flex items-center gap-1.5 whitespace-nowrap shadow-sm";
+        devTabQueueBtn.className = "px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5 whitespace-nowrap";
+        devTabFramesBtn.className = "px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5 whitespace-nowrap";
         devPanelStudents.classList.remove('hidden');
         devPanelQueue.classList.add('hidden');
         devPanelFrames.classList.add('hidden');
@@ -460,9 +449,9 @@ if (devTabStudentsBtn && devTabQueueBtn && devTabFramesBtn) {
 
     devTabQueueBtn.onclick = () => {
         currentDevTab = 'QUEUE';
-        devTabQueueBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/40 transition-all flex items-center gap-1.5 whitespace-nowrap";
-        devTabStudentsBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap";
-        devTabFramesBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap";
+        devTabQueueBtn.className = "px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold bg-sky-100 text-sky-800 border border-sky-300 transition-all flex items-center gap-1.5 whitespace-nowrap shadow-sm";
+        devTabStudentsBtn.className = "px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5 whitespace-nowrap";
+        devTabFramesBtn.className = "px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5 whitespace-nowrap";
         devPanelQueue.classList.remove('hidden');
         devPanelStudents.classList.add('hidden');
         devPanelFrames.classList.add('hidden');
@@ -470,9 +459,9 @@ if (devTabStudentsBtn && devTabQueueBtn && devTabFramesBtn) {
 
     devTabFramesBtn.onclick = () => {
         currentDevTab = 'FRAMES';
-        devTabFramesBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/40 transition-all flex items-center gap-1.5 whitespace-nowrap";
-        devTabStudentsBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap";
-        devTabQueueBtn.className = "px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap";
+        devTabFramesBtn.className = "px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold bg-sky-100 text-sky-800 border border-sky-300 transition-all flex items-center gap-1.5 whitespace-nowrap shadow-sm";
+        devTabStudentsBtn.className = "px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5 whitespace-nowrap";
+        devTabQueueBtn.className = "px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5 whitespace-nowrap";
         devPanelFrames.classList.remove('hidden');
         devPanelStudents.classList.add('hidden');
         devPanelQueue.classList.add('hidden');
@@ -487,23 +476,23 @@ const filterStoppedBtn = document.getElementById('filter-stopped-devices-btn');
 if (filterAllBtn && filterActiveBtn && filterStoppedBtn) {
     filterAllBtn.onclick = () => {
         currentDeviceFilter = 'ALL';
-        filterAllBtn.className = "px-2 py-0.5 rounded bg-brand-cyan/20 text-brand-cyan font-bold";
-        filterActiveBtn.className = "px-2 py-0.5 rounded text-slate-400 hover:text-white";
-        filterStoppedBtn.className = "px-2 py-0.5 rounded text-slate-400 hover:text-white";
+        filterAllBtn.className = "px-2 py-0.5 rounded bg-sky-100 text-sky-800 font-bold";
+        filterActiveBtn.className = "px-2 py-0.5 rounded text-slate-500 hover:text-slate-900";
+        filterStoppedBtn.className = "px-2 py-0.5 rounded text-slate-500 hover:text-slate-900";
         renderDevicesView();
     };
     filterActiveBtn.onclick = () => {
         currentDeviceFilter = 'ACTIVE';
-        filterActiveBtn.className = "px-2 py-0.5 rounded bg-brand-cyan/20 text-brand-cyan font-bold";
-        filterAllBtn.className = "px-2 py-0.5 rounded text-slate-400 hover:text-white";
-        filterStoppedBtn.className = "px-2 py-0.5 rounded text-slate-400 hover:text-white";
+        filterActiveBtn.className = "px-2 py-0.5 rounded bg-sky-100 text-sky-800 font-bold";
+        filterAllBtn.className = "px-2 py-0.5 rounded text-slate-500 hover:text-slate-900";
+        filterStoppedBtn.className = "px-2 py-0.5 rounded text-slate-500 hover:text-slate-900";
         renderDevicesView();
     };
     filterStoppedBtn.onclick = () => {
         currentDeviceFilter = 'STOPPED';
-        filterStoppedBtn.className = "px-2 py-0.5 rounded bg-brand-cyan/20 text-brand-cyan font-bold";
-        filterAllBtn.className = "px-2 py-0.5 rounded text-slate-400 hover:text-white";
-        filterActiveBtn.className = "px-2 py-0.5 rounded text-slate-400 hover:text-white";
+        filterStoppedBtn.className = "px-2 py-0.5 rounded bg-sky-100 text-sky-800 font-bold";
+        filterAllBtn.className = "px-2 py-0.5 rounded text-slate-500 hover:text-slate-900";
+        filterActiveBtn.className = "px-2 py-0.5 rounded text-slate-500 hover:text-slate-900";
         renderDevicesView();
     };
 }
@@ -528,7 +517,7 @@ if (rawLightbox) {
     };
 }
 
-// Calculate dynamic WebSocket URL
+// Dynamic WebSocket URL
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const wsUrl = `${protocol}//${window.location.host}/ws`;
 
@@ -601,10 +590,10 @@ function startCountdown(durationSeconds) {
     stopSessionBtn.classList.remove('hidden');
     
     sessionStatusLabel.textContent = "MONITORING ACTIVE";
-    sessionIndicator.className = "inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping";
+    sessionIndicator.className = "inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping";
     if (statSessionStatus) {
         statSessionStatus.textContent = "MONITORING ACTIVE";
-        statSessionStatus.className = "text-base font-bold font-mono text-brand-emerald";
+        statSessionStatus.className = "text-base font-bold font-mono text-emerald-700";
     }
     
     sessionTimerDisplay.textContent = formatTimerDisplay(sessionRemainingSeconds);
@@ -630,10 +619,10 @@ function resetSessionUI() {
     startSessionBtn.classList.remove('hidden');
     
     sessionStatusLabel.textContent = "STANDBY / CONCLUDED";
-    sessionIndicator.className = "inline-block w-2 h-2 rounded-full bg-slate-500";
+    sessionIndicator.className = "inline-block w-2 h-2 rounded-full bg-slate-400";
     if (statSessionStatus) {
         statSessionStatus.textContent = "STANDBY";
-        statSessionStatus.className = "text-base font-bold font-mono text-slate-400";
+        statSessionStatus.className = "text-base font-bold font-mono text-slate-700";
     }
 }
 
@@ -693,9 +682,9 @@ function connectWebSocket() {
         const statusElem = document.getElementById('ws-status');
         if (statusElem) {
             statusElem.textContent = 'SYSTEM ONLINE';
-            statusElem.className = 'text-xs font-mono text-emerald-400 tracking-wide';
+            statusElem.className = 'text-xs font-mono text-emerald-700 font-bold tracking-wide';
         }
-        logToTerminal("WebSocket Connected. Central Hub Active.", "success");
+        logToTerminal("WebSocket Connected. Central Hub Active (24h IST).", "success");
         showToast("Connected to Central Subsystem", "success");
         
         ws.send(JSON.stringify({ type: 'get_session_status' }));
@@ -768,7 +757,7 @@ function connectWebSocket() {
             startCountdown(data.duration_minutes * 60);
             
             confirmedPeople.clear();
-            if (confirmedList) confirmedList.innerHTML = '<div class="text-center text-slate-500/50 mt-20 text-sm font-mono tracking-widest">AWAITING ATTENDANCE (SCANNING VIA RASPBERRY PI)...</div>';
+            if (confirmedList) confirmedList.innerHTML = '<div class="text-center text-slate-400 mt-20 text-sm font-mono tracking-widest">AWAITING ATTENDANCE (SCANNING VIA RASPBERRY PI)...</div>';
             if (sessionPresentCount) sessionPresentCount.textContent = '0';
             if (ledgerSessionIdLabel) ledgerSessionIdLabel.textContent = `Session: ${data.session_id}`;
 
@@ -863,7 +852,6 @@ function connectWebSocket() {
             return;
         }
 
-        // --- FRAME RESULTS (IN DEMO MODE) ---
         if (data.type === 'ready') {
             isProcessing = false;
         }
@@ -875,7 +863,7 @@ function connectWebSocket() {
         const statusElem = document.getElementById('ws-status');
         if (statusElem) {
             statusElem.textContent = 'RECONNECTING...';
-            statusElem.className = 'text-xs font-mono text-red-500 tracking-wide animate-pulse';
+            statusElem.className = 'text-xs font-mono text-rose-600 font-bold tracking-wide animate-pulse';
         }
         const timeout = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
         setTimeout(connectWebSocket, timeout);
@@ -892,26 +880,26 @@ function addConfirmedEntry(name, rollNumber, time, deviceName) {
     if (sessionPresentCount) sessionPresentCount.textContent = confirmedPeople.size;
     
     const div = document.createElement('div');
-    div.className = 'bg-brand-emerald/10 p-4 rounded-xl border border-brand-emerald/30 flex justify-between items-center animate-slideIn shadow-[0_0_15px_rgba(16,185,129,0.1)]';
+    div.className = 'glass-panel p-4 rounded-2xl flex justify-between items-center animate-slideIn shadow-sm border border-slate-200/90';
     div.innerHTML = `
-        <div class="flex items-center gap-3">
-            <div class="w-9 h-9 rounded-lg bg-brand-emerald/20 text-brand-emerald flex items-center justify-center text-xs font-bold font-mono border border-brand-emerald/50">
+        <div class="flex items-center gap-3.5">
+            <div class="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold font-mono border border-emerald-200">
                 #${String(confirmedPeople.size).padStart(2, '0')}
             </div>
             <div>
-                <div class="font-bold text-white tracking-wide font-mono text-sm">${name}</div>
-                <div class="text-xs text-brand-cyan font-mono font-bold mt-0.5">Roll Number: ${rollNumber}</div>
+                <div class="font-bold text-slate-900 font-mono text-sm">${name}</div>
+                <div class="text-xs text-sky-700 font-mono font-bold mt-0.5">Roll Number: ${rollNumber}</div>
             </div>
         </div>
         <div class="text-right">
-            <span class="text-xs text-brand-emerald font-mono bg-brand-emerald/10 px-2.5 py-1 rounded border border-brand-emerald/20">${time} ✓</span>
-            <div class="text-[10px] text-slate-500 font-mono mt-1">Node: ${deviceName}</div>
+            <span class="text-xs text-emerald-700 font-mono font-bold bg-emerald-50 px-3 py-1 rounded-xl border border-emerald-200">${time} IST ✓</span>
+            <div class="text-[10px] text-slate-400 font-mono mt-1">Node: ${deviceName}</div>
         </div>
     `;
     confirmedList.insertBefore(div, confirmedList.firstChild);
 }
 
-// --- LOCAL CAMERA INITIALIZER (FOR DEMO & REGISTRATION ONLY) ---
+// --- LOCAL CAMERA INITIALIZER ---
 async function startCamera(selectedDeviceId = null) {
     try {
         if (currentStream) {
@@ -1012,7 +1000,7 @@ if (deleteAllBtn) {
                 showToast("Database Wiped Clean", "success");
                 confirmedPeople.clear();
                 if (sessionPresentCount) sessionPresentCount.textContent = '0';
-                confirmedList.innerHTML = '<div class="text-center text-slate-500/50 mt-20 text-sm font-mono tracking-widest">AWAITING ATTENDANCE (SCANNING VIA RASPBERRY PI)...</div>';
+                confirmedList.innerHTML = '<div class="text-center text-slate-400 mt-20 text-sm font-mono tracking-widest">AWAITING ATTENDANCE (SCANNING VIA RASPBERRY PI)...</div>';
             }
         } catch (err) {
             logToTerminal(err.message, 'error');
