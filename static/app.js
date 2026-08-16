@@ -408,7 +408,7 @@ function renderSelectedDeviceDetails() {
                     badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200 font-bold';
                     statusIcon = '✅';
                     statusText = `MATCH APPROVED (${item.score || 100}%)`;
-                } else if (item.status === 'no_match') {
+                } else if (item.status === 'no_match' || item.status === 'unknown') {
                     badgeClass = 'bg-amber-50 text-amber-700 border-amber-200';
                     statusIcon = '❌';
                     statusText = 'NO MATCH IN DB';
@@ -428,9 +428,10 @@ function renderSelectedDeviceDetails() {
                         <div>
                             <div class="font-bold text-slate-900 font-mono text-xs flex items-center gap-2">
                                 <span>${item.name || 'Cropped Face'}</span>
-                                ${item.roll_number && item.roll_number !== 'N/A' ? `<span class="text-[10px] text-sky-700 font-normal font-mono">[Roll: ${item.roll_number}]</span>` : ''}
+                                ${item.queue_label ? `<span class="text-[9px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200 font-mono">${item.queue_label}</span>` : ''}
+                                ${item.roll_number && item.roll_number !== 'N/A' && item.roll_number !== '...' ? `<span class="text-[10px] text-sky-700 font-normal font-mono">[Roll: ${item.roll_number}]</span>` : ''}
                             </div>
-                            <div class="text-[11px] font-mono text-slate-500 mt-0.5">${item.result || 'Processing via AWS Rekognition...'}</div>
+                            <div class="text-[11px] font-mono text-slate-600 mt-0.5">${item.result || 'Processing via AWS Rekognition...'}</div>
                         </div>
                     </div>
                     <div class="flex flex-col items-end gap-1 flex-shrink-0">

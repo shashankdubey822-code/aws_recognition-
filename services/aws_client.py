@@ -1,21 +1,25 @@
+import os
 import boto3
 from botocore.exceptions import ClientError
-from core.config import AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, COLLECTION_ID, MATCH_THRESHOLD
+from core.config import (
+    AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, 
+    COLLECTION_ID, MATCH_THRESHOLD
+)
 
-# Initialize Boto3 Client
-if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY:
+# Initialize AWS Rekognition Client
+try:
     rekognition = boto3.client(
         'rekognition',
         aws_access_key_id=AWS_ACCESS_KEY_ID,
         aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
         region_name=AWS_REGION
     )
-else:
+except Exception as e:
     rekognition = None
-    print("⚠️ WARNING: AWS Credentials not found. AWS features will not work.")
+    print(f"⚠️ WARNING: AWS Credentials not found. AWS features will not work.")
 
 def ensure_collection_exists():
-    """Checks if the Rekognition Collection exists, creates it if not."""
+    """Checks if the attendance collection exists in AWS, creates it if not."""
     if not rekognition: return
     try:
         rekognition.describe_collection(CollectionId=COLLECTION_ID)
@@ -45,7 +49,7 @@ def register_face_to_aws(image_bytes, name):
             DetectionAttributes=['DEFAULT']
         )
         
-        if len(response['FaceRecords']) > 0:
+        if len(response.get('FaceRecords', [])) > 0:
             return True, f"Indexed 1 face for {name}"
         else:
             return False, "No face found by AWS."
@@ -54,8 +58,13 @@ def register_face_to_aws(image_bytes, name):
         return False, str(e)
 
 def search_face_on_aws(image_bytes):
-    """Searches AWS for the faces in the image."""
-    if not rekognition: return []
+    """
+    Searches AWS for the face in the cropped image bytes.
+    Always returns a clean dictionary format:
+    {'match': True/False, 'identity': '...', 'score': float, 'status': 'match'/'unknown'/'error', 'message': '...'}
+    """
+    if not rekognition: 
+        return {"match": False, "identity": "Unknown", "score": 0.0, "status": "unknown", "message": "AWS not configured"}
     
     try:
         response = rekognition.search_faces_by_image(
@@ -65,31 +74,48 @@ def search_face_on_aws(image_bytes):
             FaceMatchThreshold=MATCH_THRESHOLD
         )
         
-        results = []
-        if len(response['FaceMatches']) > 0:
-            match = response['FaceMatches'][0]
-            confidence = match['Similarity']
-            name = match['Face']['ExternalImageId']
-            bbox = response['SearchedFaceBoundingBox']
+        matches = response.get('FaceMatches', [])
+        if matches and len(matches) > 0:
+            top_match = matches[0]
+            confidence = float(top_match.get('Similarity', 0.0))
+            identity = top_match.get('Face', {}).get('ExternalImageId', 'Unknown')
             
-            results.append({
-                "status": "match",
-                "name": name,
+            return {
+                "match": True,
+                "identity": identity,
                 "score": round(confidence, 1),
-                "aws_box": bbox
-            })
+                "status": "match",
+                "message": f"AWS Match Approved ({round(confidence, 1)}%)"
+            }
         else:
-            if 'SearchedFaceBoundingBox' in response:
-                results.append({
-                    "status": "unknown",
-                    "name": "Unknown",
-                    "score": 0,
-                    "aws_box": response['SearchedFaceBoundingBox']
-                })
-                
-        return results
+            return {
+                "match": False,
+                "identity": "Unknown",
+                "score": 0.0,
+                "status": "unknown",
+                "message": "No match found in AWS collection"
+            }
+
+    except ClientError as ce:
+        code = ce.response.get('Error', {}).get('Code', 'ClientError')
+        msg = ce.response.get('Error', {}).get('Message', str(ce))
+        print(f"⚠️ AWS Rekognition ClientError [{code}]: {msg}")
+        return {
+            "match": False,
+            "identity": "Unknown",
+            "score": 0.0,
+            "status": "error",
+            "message": f"AWS {code}: {msg}"
+        }
     except Exception as e:
-        return []
+        print(f"⚠️ AWS Rekognition search exception: {e}")
+        return {
+            "match": False,
+            "identity": "Unknown",
+            "score": 0.0,
+            "status": "error",
+            "message": str(e)
+        }
 
 def delete_all_faces():
     """Deletes the entire collection and recreates it to wipe all face embeddings."""

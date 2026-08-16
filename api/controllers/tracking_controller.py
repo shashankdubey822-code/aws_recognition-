@@ -96,7 +96,8 @@ class TrackingController:
             if area >= MIN_FACE_AREA:
                 valid_faces.append(face)
 
-        print(f"[EDGE AI] 🔍 Processed frame #{connected_devices.get(dev_id, {}).get('total_frames', 1)} from {dev_name} ({dev_id}): Found {len(valid_faces)} valid faces (Total raw detections: {len(all_faces)})")
+        frame_num = connected_devices.get(dev_id, {}).get('total_frames', 1)
+        print(f"[EDGE AI] 🔍 Processed frame #{frame_num} from {dev_name} ({dev_id}): Found {len(valid_faces)} valid faces (Total raw detections: {len(all_faces)})")
 
         if not valid_faces:
             await self.broadcast_event({
@@ -105,7 +106,6 @@ class TrackingController:
                 "stage": "IDLE",
                 "message": "Frame Processed (0 Faces in View)"
             })
-            # Also update device overview numbers
             await self.broadcast_event({
                 "type": "devices_update",
                 "devices": list(connected_devices.values())
@@ -121,16 +121,18 @@ class TrackingController:
         for idx, vf in enumerate(valid_faces):
             crop_b64 = "data:image/jpeg;base64," + base64.b64encode(vf["bytes"]).decode('utf-8')
             q_id = f"q_{int(time.time()*1000)}_{idx}"
+            queue_label = f"Queue #{frame_num}.{idx+1}"
 
             q_item = {
                 "id": q_id,
+                "queue_label": queue_label,
                 "time": current_time_str,
                 "crop": crop_b64,
                 "status": "scanning",
-                "name": "Scanning Face...",
+                "name": f"Processing {queue_label}...",
                 "roll_number": "...",
                 "score": 0.0,
-                "result": "🔄 Enqueued in FIFO Pipeline — Dispatched to AWS Rekognition..."
+                "result": f"🔄 [{queue_label}] Dispatched to AWS Rekognition..."
             }
             queue_items.append(q_item)
             search_tasks.append((idx, q_item, vf["bytes"]))
@@ -141,8 +143,8 @@ class TrackingController:
                 connected_devices[dev_id]["cropped_queue"] = []
             for qi in queue_items:
                 connected_devices[dev_id]["cropped_queue"].insert(0, qi)
-            if len(connected_devices[dev_id]["cropped_queue"]) > 30:
-                connected_devices[dev_id]["cropped_queue"] = connected_devices[dev_id]["cropped_queue"][:30]
+            if len(connected_devices[dev_id]["cropped_queue"]) > 40:
+                connected_devices[dev_id]["cropped_queue"] = connected_devices[dev_id]["cropped_queue"][:40]
 
             await self.broadcast_event({
                 "type": "device_stage_update",
@@ -162,69 +164,74 @@ class TrackingController:
         for idx, q_item, face_bytes in search_tasks:
             match_res = await asyncio.to_thread(search_face_on_aws, face_bytes)
             
-            if dev_id in connected_devices and "cropped_queue" in connected_devices[dev_id]:
-                if match_res and match_res.get("match"):
-                    identity_str = match_res.get("identity", "Unknown")
-                    score = match_res.get("score", 95.0)
-                    roll_no, display_name = parse_identity(identity_str)
+            # Defensive check: ensure match_res is a dict
+            if isinstance(match_res, list):
+                match_res = match_res[0] if len(match_res) > 0 else {"match": False, "identity": "Unknown", "score": 0.0}
+            elif not isinstance(match_res, dict):
+                match_res = {"match": False, "identity": "Unknown", "score": 0.0}
 
-                    if display_name and display_name != "Unknown":
-                        q_item["status"] = "match"
-                        q_item["name"] = display_name
-                        q_item["roll_number"] = roll_no
-                        q_item["score"] = score
-                        q_item["result"] = f"✅ AWS MATCH APPROVED ({score}%) — Vector Matched"
+            if match_res.get("match"):
+                identity_str = match_res.get("identity", "Unknown")
+                score = match_res.get("score", 95.0)
+                roll_no, display_name = parse_identity(identity_str)
 
-                        # Mark session attendance
-                        marked, s_time = mark_attendance(
-                            identity_str=identity_str,
-                            face_bytes=face_bytes,
-                            device_id=dev_name or dev_id
-                        )
+                if display_name and display_name != "Unknown":
+                    q_item["status"] = "match"
+                    q_item["name"] = display_name
+                    q_item["roll_number"] = roll_no
+                    q_item["score"] = score
+                    q_item["result"] = f"✅ AWS MATCH APPROVED ({score}%) — Student Verified"
 
-                        if marked:
-                            # Save attendee verified thumbnail
-                            os.makedirs("static/attendees", exist_ok=True)
-                            photo_path = f"static/attendees/attendee_{roll_no}_{get_compact_timestamp_str()}.jpg"
-                            try:
-                                with open(photo_path, "wb") as pf:
-                                    pf.write(face_bytes)
-                            except Exception:
-                                photo_path = ""
+                    # Mark session attendance
+                    marked, s_time = mark_attendance(
+                        identity_str=identity_str,
+                        face_bytes=face_bytes,
+                        device_id=dev_name or dev_id
+                    )
 
-                            student_entry = {
-                                "name": display_name,
-                                "roll_number": roll_no,
-                                "time": s_time or current_time_str,
-                                "photo": f"/{photo_path}" if photo_path else ""
-                            }
-                            
-                            if "verified_students" not in connected_devices[dev_id]:
-                                connected_devices[dev_id]["verified_students"] = []
-                            
-                            if not any(s.get("name") == display_name for s in connected_devices[dev_id]["verified_students"]):
-                                connected_devices[dev_id]["verified_students"].insert(0, student_entry)
+                    if marked:
+                        # Save attendee verified thumbnail
+                        os.makedirs("static/attendees", exist_ok=True)
+                        photo_path = f"static/attendees/attendee_{roll_no}_{get_compact_timestamp_str()}.jpg"
+                        try:
+                            with open(photo_path, "wb") as pf:
+                                pf.write(face_bytes)
+                        except Exception:
+                            photo_path = ""
 
-                            # Broadcast attendance confirmation to all UI subscribers
-                            await self.broadcast_event({
-                                "type": "attendance",
-                                "name": display_name,
-                                "roll_number": roll_no,
-                                "time": s_time or current_time_str,
-                                "device_id": dev_name or dev_id,
-                                "photo": f"/{photo_path}" if photo_path else ""
-                            })
-                            print(f"[EDGE AI] 🎓 Attendance verified: {display_name} (Roll: {roll_no}) at {s_time or current_time_str} IST via {dev_name}")
-                    else:
-                        q_item["status"] = "no_match"
-                        q_item["name"] = "Unknown Entity"
-                        q_item["roll_number"] = "N/A"
-                        q_item["result"] = "❌ NO MATCH IN AWS DATABASE — Identity Unregistered"
+                        student_entry = {
+                            "name": display_name,
+                            "roll_number": roll_no,
+                            "time": s_time or current_time_str,
+                            "photo": f"/{photo_path}" if photo_path else ""
+                        }
+                        
+                        if "verified_students" not in connected_devices[dev_id]:
+                            connected_devices[dev_id]["verified_students"] = []
+                        
+                        if not any(s.get("name") == display_name for s in connected_devices[dev_id]["verified_students"]):
+                            connected_devices[dev_id]["verified_students"].insert(0, student_entry)
+
+                        # Broadcast attendance confirmation to all UI subscribers
+                        await self.broadcast_event({
+                            "type": "attendance",
+                            "name": display_name,
+                            "roll_number": roll_no,
+                            "time": s_time or current_time_str,
+                            "device_id": dev_name or dev_id,
+                            "photo": f"/{photo_path}" if photo_path else ""
+                        })
+                        print(f"[EDGE AI] 🎓 Attendance verified: {display_name} (Roll: {roll_no}) at {s_time or current_time_str} IST via {dev_name}")
                 else:
                     q_item["status"] = "no_match"
                     q_item["name"] = "Unknown Entity"
                     q_item["roll_number"] = "N/A"
-                    q_item["result"] = "❌ NO MATCH IN AWS DATABASE — Identity Unregistered"
+                    q_item["result"] = "❌ NO MATCH IN AWS DATABASE — Unregistered Person"
+            else:
+                q_item["status"] = "no_match"
+                q_item["name"] = "Unknown Entity"
+                q_item["roll_number"] = "N/A"
+                q_item["result"] = f"❌ NO MATCH IN AWS DATABASE ({match_res.get('message', 'Unregistered Person')})"
 
         # 6. Broadcast final updated FIFO queue & stage complete
         if dev_id in connected_devices:
