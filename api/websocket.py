@@ -1,5 +1,5 @@
 """
-api/websocket.py - Real-Time WebSocket Controller with Multi-Device Targeting & 24-Hour IST.
+api/websocket.py - Real-Time WebSocket Controller with Multi-Device Targeting, Flush Queue Protection & 24-Hour IST.
 Handles bi-directional communication with edge hardware and browser dashboard.
 """
 
@@ -58,13 +58,38 @@ async def auto_stop_session_timer(duration_seconds: int):
         pass
 
 
+async def wait_for_in_flight_aws_scans(max_wait_seconds: float = 6.0):
+    """
+    Queue Flush Guard: Waits until all in-flight face crops in the FIFO queue 
+    have finished contacting AWS and received their final label ('match', 'no_match', or 'error') 
+    BEFORE compiling and emailing the final attendance report.
+    """
+    start_time = time.time()
+    while time.time() - start_time < max_wait_seconds:
+        pending_count = 0
+        for dev_id, dev_data in connected_devices.items():
+            queue = dev_data.get("cropped_queue", [])
+            for item in queue:
+                if item.get("status") == "scanning":
+                    pending_count += 1
+            if dev_data.get("stage") == "AWS_MATCHING":
+                pending_count += 1
+
+        if pending_count == 0:
+            break
+        
+        print(f"[SESSION FLUSH] ⏳ Waiting for {pending_count} pending face scans to complete before emailing report...")
+        await asyncio.sleep(0.5)
+
+
 async def end_active_session(reason: str = "Teacher Manual Stop"):
     """
     Terminates the active class session:
-    1. Sends stop command to all or targeted Raspberry Pi edge nodes.
-    2. Gathers verified session attendance.
-    3. Triggers asynchronous background task to compile Excel and deliver email report via Resend HTTPS REST API.
-    4. Broadcasts session completion status to all connected dashboards.
+    1. Sends stop command to edge nodes to immediately halt further camera captures.
+    2. Gracefully awaits any in-flight AWS face verifications to finish and label.
+    3. Gathers the complete verified attendance ledger.
+    4. Triggers asynchronous background task to compile Excel and deliver email report via Resend HTTPS REST API.
+    5. Broadcasts session completion status to all connected dashboards.
     """
     global session_timer_task
     
@@ -78,11 +103,25 @@ async def end_active_session(reason: str = "Teacher Manual Stop"):
     session_id = active_session.get("id", f"SES_{get_compact_timestamp_str()}")
     active_session["active"] = False
     active_session["end_time"] = time.time()
+
+    print(f"[SESSION] 🛑 Concluding session {session_id}. Reason: {reason}. Waiting for in-flight face scans (24h IST: {get_time_str()})...")
+
+    # 1. First signal edge cameras to stop capturing new frames
+    for dev_id in connected_devices:
+        connected_devices[dev_id]["status"] = "standby"
+
+    await broadcast_json({
+        "type": "devices_update",
+        "devices": list(connected_devices.values())
+    })
+
+    # 2. FLUSH IN-FLIGHT SCANS: Guarantee every detected face gets labeled before email is built
+    await wait_for_in_flight_aws_scans(max_wait_seconds=6.0)
+
+    # 3. Gather final attendees after all in-flight scans have verified
     attendees = list(active_session.get("attendees", []))
 
-    print(f"[SESSION] 🛑 Concluding session {session_id}. Reason: {reason}. Total Present: {len(attendees)} (24h IST: {get_time_str()})")
-
-    # Broadcast stop command to edge nodes and browser clients
+    # 4. Broadcast final stop status to UI
     await broadcast_json({
         "type": "session_stopped",
         "session_id": session_id,
@@ -91,9 +130,7 @@ async def end_active_session(reason: str = "Teacher Manual Stop"):
         "end_time": active_session["end_time"]
     })
 
-    # Reset per-device status
     for dev_id in connected_devices:
-        connected_devices[dev_id]["status"] = "standby"
         connected_devices[dev_id]["stage"] = "IDLE"
 
     await broadcast_json({
@@ -101,7 +138,7 @@ async def end_active_session(reason: str = "Teacher Manual Stop"):
         "devices": list(connected_devices.values())
     })
 
-    # Asynchronously dispatch email report via HTTPS REST API in thread pool
+    # 5. Asynchronously dispatch final compiled email report via HTTPS REST API
     session_data = {
         "id": session_id,
         "attendees": attendees,
