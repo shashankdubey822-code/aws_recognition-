@@ -7,17 +7,15 @@ import traceback
 import pandas as pd
 from datetime import datetime
 
-from core.config import (
-    RESEND_API_KEY, TEACHER_REPORT_EMAIL, REPORTS_DIR,
-    SMTP_SERVER, SMTP_PORT, SMTP_EMAIL, SMTP_PASSWORD
-)
+from core.config import RESEND_API_KEY, TEACHER_REPORT_EMAIL, REPORTS_DIR
+from core.timezone_utils import get_time_str, get_date_str, get_timestamp_full_str, get_compact_timestamp_str
 
 DIAGNOSTICS_FILE = os.path.join(REPORTS_DIR, "email_error_diagnostics.txt")
 
 def log_email_diagnostic(stage: str, status: str, details: str):
     """Writes detailed step-by-step diagnostic trace to dedicated error file."""
     os.makedirs(REPORTS_DIR, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = get_timestamp_full_str()
     log_line = f"[{timestamp}] [{stage}] [{status}] {details}\n"
     print(log_line.strip())
     try:
@@ -38,10 +36,10 @@ def get_latest_email_diagnostics() -> str:
     return "No email dispatch operations recorded yet."
 
 def generate_session_excel(session_data: dict) -> str:
-    """Generates a styled Excel attendance report for a concluded session."""
+    """Generates a styled Excel attendance report for a concluded session in 24-hour IST."""
     os.makedirs(REPORTS_DIR, exist_ok=True)
     session_id = session_data.get("id", "SESSION")
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = get_compact_timestamp_str()
     filename = f"Attendance_Report_{session_id}_{timestamp}.xlsx"
     filepath = os.path.join(REPORTS_DIR, filename)
     
@@ -53,14 +51,15 @@ def generate_session_excel(session_data: dict) -> str:
             "S.No": idx,
             "Roll Number": att.get("roll_number", "N/A"),
             "Student Name": att.get("name", "Unknown"),
-            "Time Marked": att.get("time", ""),
-            "Date": att.get("date", datetime.now().strftime("%Y-%m-%d")),
-            "Status": "PRESENT / VERIFIED"
+            "Time Marked (24h IST)": att.get("time", get_time_str()),
+            "Date": att.get("date", get_date_str()),
+            "Classroom Node": att.get("device_id", "Classroom 101"),
+            "Status": "PRESENT / VERIFIED ✓"
         })
     
     df = pd.DataFrame(rows)
     if df.empty:
-        df = pd.DataFrame(columns=["S.No", "Roll Number", "Student Name", "Time Marked", "Date", "Status"])
+        df = pd.DataFrame(columns=["S.No", "Roll Number", "Student Name", "Time Marked (24h IST)", "Date", "Classroom Node", "Status"])
         
     try:
         df.to_excel(filepath, index=False, sheet_name="Attendance_Session")
@@ -72,11 +71,13 @@ def generate_session_excel(session_data: dict) -> str:
     return filepath
 
 def send_via_resend_api(session_data: dict, target_email: str, report_path: str) -> tuple[bool, str]:
-    """Sends email via standard HTTPS REST API (Port 443) using Resend."""
+    """Sends email via standard HTTPS REST API (Port 443) using Resend with 24h IST formatting."""
     api_key = RESEND_API_KEY.strip()
     session_id = session_data.get("id", "LIVE_SESSION")
     attendees = session_data.get("attendees", [])
     duration = session_data.get("duration_minutes", 50)
+    current_time_str = get_time_str()
+    current_date_str = get_date_str()
     
     log_email_diagnostic("HTTPS_API", "START", f"Dispatching via Resend HTTPS REST API (Port 443) to {target_email}...")
     
@@ -88,7 +89,7 @@ def send_via_resend_api(session_data: dict, target_email: str, report_path: str)
             <td style="padding: 10px; text-align: center; color: #64748b;">{idx}</td>
             <td style="padding: 10px; font-weight: bold; color: #0284c7;">{att.get('roll_number', 'N/A')}</td>
             <td style="padding: 10px; font-weight: 600; color: #1e293b;">{att.get('name', 'Unknown')}</td>
-            <td style="padding: 10px; text-align: center; color: #475569;">{att.get('time', '')}</td>
+            <td style="padding: 10px; text-align: center; color: #475569; font-weight: bold;">{att.get('time', current_time_str)}</td>
             <td style="padding: 10px; text-align: center; color: #16a34a; font-weight: bold;">VERIFIED ✓</td>
         </tr>
         """
@@ -102,7 +103,7 @@ def send_via_resend_api(session_data: dict, target_email: str, report_path: str)
         <div style="max-width: 650px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
             <div style="background: linear-gradient(135deg, #0284c7, #0f172a); padding: 24px; color: white;">
                 <h2 style="margin: 0; font-size: 22px; letter-spacing: 0.5px;">🎓 Nexus AI Security & Attendance Report</h2>
-                <p style="margin: 6px 0 0 0; opacity: 0.85; font-size: 13px;">Classroom Monitoring Session Summary</p>
+                <p style="margin: 6px 0 0 0; opacity: 0.85; font-size: 13px;">Classroom Monitoring Session Summary (24-Hour IST)</p>
             </div>
             
             <div style="padding: 24px;">
@@ -120,6 +121,10 @@ def send_via_resend_api(session_data: dict, target_email: str, report_path: str)
                         <div style="font-weight: bold; font-size: 14px; color: #16a34a;">{len(attendees)} Students</div>
                     </div>
                 </div>
+
+                <div style="font-size: 12px; color: #64748b; margin-bottom: 15px;">
+                    📅 <strong>Report Generated:</strong> {current_date_str} at <strong>{current_time_str} (IST)</strong>
+                </div>
                 
                 <h3 style="font-size: 15px; margin-bottom: 12px; color: #334155;">Verified Attendance Ledger</h3>
                 <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
@@ -128,7 +133,7 @@ def send_via_resend_api(session_data: dict, target_email: str, report_path: str)
                             <th style="padding: 10px; text-align: center;">S.No</th>
                             <th style="padding: 10px; text-align: left;">Roll No</th>
                             <th style="padding: 10px; text-align: left;">Student Name</th>
-                            <th style="padding: 10px; text-align: center;">Time</th>
+                            <th style="padding: 10px; text-align: center;">Time (24h IST)</th>
                             <th style="padding: 10px; text-align: center;">Status</th>
                         </tr>
                     </thead>
@@ -178,7 +183,7 @@ def send_via_resend_api(session_data: dict, target_email: str, report_path: str)
     payload_data = {
         "from": "Nexus AI Attendance <onboarding@resend.dev>",
         "to": [target_email],
-        "subject": f"📊 Attendance Session Report [{session_id}] - {len(attendees)} Present",
+        "subject": f"📊 Attendance Session Report [{session_id}] - {len(attendees)} Present ({current_time_str} IST)",
         "html": html_content,
         "attachments": attachments
     }

@@ -2,9 +2,9 @@ import os
 import time
 import sqlite3
 import threading
-from datetime import datetime
 from core.config import LOG_FILE, COOL_DOWN_SEC
 from core.state import attendance_memory, last_seen, active_session, connected_devices, DB_PATH
+from core.timezone_utils import get_time_str, get_date_str, get_now
 
 # Threading lock to prevent CSV/DB corruption during high-speed recognition
 attendance_lock = threading.Lock()
@@ -42,13 +42,13 @@ def parse_identity(raw_id: str):
 
 def mark_attendance(raw_identity: str, image_bytes: bytes = None, device_id: str = "edge_device"):
     """
-    Marks attendance for a verified student.
+    Marks attendance for a verified student in 24-hour IST local time.
     Tracks attendance per active session and per classroom device node.
     """
-    now = time.time()
+    now_epoch = time.time()
     name, roll_number = parse_identity(raw_identity)
-    time_str = datetime.now().strftime("%H:%M:%S")
-    date_str = datetime.now().strftime("%Y-%m-%d")
+    time_str = get_time_str() # 24-hour local time (e.g. 09:51:24)
+    date_str = get_date_str() # Local date (e.g. 2026-08-16)
     photo_path = None
     
     with attendance_lock:
@@ -76,7 +76,7 @@ def mark_attendance(raw_identity: str, image_bytes: bytes = None, device_id: str
         if image_bytes:
             try:
                 os.makedirs("static/attendees", exist_ok=True)
-                timestamp_int = int(now)
+                timestamp_int = int(now_epoch)
                 safe_name = "".join(c for c in name if c.isalnum() or c in (' ', '_')).replace(" ", "_")
                 safe_roll = "".join(c for c in roll_number if c.isalnum() or c in ('_', '-')) or "NA"
                 filename = f"static/attendees/{safe_roll}_{safe_name}_{timestamp_int}.jpg"
@@ -86,7 +86,7 @@ def mark_attendance(raw_identity: str, image_bytes: bytes = None, device_id: str
             except Exception as e:
                 print(f"⚠️ Failed to save attendee photo: {e}")
 
-        # 2. Construct entry
+        # 2. Construct entry with 24-hour IST timestamp
         entry = {
             "roll_number": roll_number,
             "name": name,
@@ -134,5 +134,5 @@ def mark_attendance(raw_identity: str, image_bytes: bytes = None, device_id: str
         except Exception as db_err:
             print(f"⚠️ DB Error: {db_err}")
 
-        print(f"✅ [ATTENDANCE MARKED] {name} (Roll: {roll_number}) via {device_id} at {time_str}")
+        print(f"✅ [ATTENDANCE MARKED] {name} (Roll: {roll_number}) via {device_id} at {time_str} IST")
         return "success", name, roll_number, time_str

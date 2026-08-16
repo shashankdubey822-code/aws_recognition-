@@ -2,7 +2,6 @@ import time
 import json
 import base64
 import asyncio
-from datetime import datetime
 from fastapi import WebSocket
 
 from services.aws_client import search_face_on_aws, register_face_to_aws
@@ -10,6 +9,7 @@ from services.attendance import mark_attendance, parse_identity
 from services.face_detector import detect_faces_crowd
 from core.config import MIN_FACE_AREA
 from core.state import connected_devices
+from core.timezone_utils import get_time_str
 
 class TrackingController:
     def __init__(self, websocket: WebSocket, broadcast_func=None):
@@ -61,9 +61,10 @@ class TrackingController:
             })
             return
 
-        # 3. Create FIFO Cropped Queue Items (Direct to AWS — NO SPOOF BLOCKING)
+        # 3. Create FIFO Cropped Queue Items with 24-hour IST time
         queue_items = []
         search_tasks = []
+        current_time_str = get_time_str()
         
         for idx, vf in enumerate(valid_faces):
             crop_b64 = "data:image/jpeg;base64," + base64.b64encode(vf["bytes"]).decode('utf-8')
@@ -71,7 +72,7 @@ class TrackingController:
 
             q_item = {
                 "id": q_id,
-                "time": datetime.now().strftime("%H:%M:%S"),
+                "time": current_time_str,
                 "crop": crop_b64,
                 "status": "scanning",
                 "name": "Scanning Face...",
@@ -125,14 +126,14 @@ class TrackingController:
                         q_item["score"] = confidence
                         q_item["result"] = f"✅ AWS MATCH APPROVED: {display_name} (Roll: {roll_no}) [Confidence: {confidence}%]"
 
-                        # Mark Attendance with photo & device_id
+                        # Mark Attendance in 24-hour IST with photo & device_id
                         status, s_name, s_roll, s_time = mark_attendance(raw_id, face_bytes, device_id=dev_id)
                         if status in ("success", "already_marked"):
                             await self.broadcast_event({
                                 "type": "attendance", 
                                 "name": display_name, 
                                 "roll_number": roll_no,
-                                "time": s_time or "Now",
+                                "time": s_time or current_time_str,
                                 "device_id": dev_id
                             })
                             
@@ -141,7 +142,7 @@ class TrackingController:
                                 "type": "devices_update",
                                 "devices": list(connected_devices.values())
                             })
-                            print(f"[EDGE AI] 🎓 Attendance verified and ledger updated: {display_name} (Roll: {roll_no}) via {dev_id}")
+                            print(f"[EDGE AI] 🎓 Attendance verified: {display_name} (Roll: {roll_no}) at {s_time or current_time_str} IST via {dev_id}")
                     else:
                         q_item["status"] = "no_match"
                         q_item["name"] = "Unknown Entity"

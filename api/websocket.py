@@ -7,6 +7,7 @@ from datetime import datetime
 from fastapi import WebSocket, WebSocketDisconnect
 
 from core.state import active_connections, connected_devices, active_session, attendance_memory, last_seen, PRESENT_IDENTITIES
+from core.timezone_utils import get_time_str, get_date_str, get_timestamp_full_str, get_compact_timestamp_str
 from api.controllers.registration_controller import RegistrationController
 from api.controllers.tracking_controller import TrackingController
 from services.email_service import send_session_email_report
@@ -83,8 +84,9 @@ def save_raw_frame(device_id: str, image_bytes: bytes) -> str:
         dev_dir = os.path.join("static/raw_frames", clean_dev)
         os.makedirs(dev_dir, exist_ok=True)
         
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
-        filename = f"raw_{timestamp}.jpg"
+        timestamp = get_compact_timestamp_str()
+        micro = int(time.time() * 1000) % 1000
+        filename = f"raw_{timestamp}_{micro:03d}.jpg"
         filepath = os.path.join(dev_dir, filename)
         
         with open(filepath, "wb") as f:
@@ -136,7 +138,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # --- 1. Session Control Triggers ---
                 if p_type == "start_session":
                     duration = int(payload.get("duration_minutes", 50))
-                    session_id = f"SES_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                    session_id = f"SES_{get_compact_timestamp_str()}"
                     
                     # Clean slate: Fresh session starts from 0 students
                     last_seen.clear()
@@ -161,7 +163,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     session_timer_task = asyncio.create_task(auto_stop_session_timer(duration * 60))
                     
-                    print(f"[SESSION] ▶️ Started fresh session {session_id} for {duration} minutes.")
+                    print(f"[SESSION] ▶️ Started fresh session {session_id} for {duration} minutes (24h IST: {get_time_str()}).")
                     
                     await broadcast_json({
                         "type": "session_started",
@@ -196,7 +198,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     else:
                         await websocket.send_json({
                             "type": "session_status",
-                            "active": False
+                            "active": False,
+                            "remaining_seconds": 0
                         })
                     continue
 
@@ -206,7 +209,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     dev_id = payload.get("device_id") or f"rpi_{device_name.replace(' ', '_').lower()}"
                     assigned_device_id = dev_id
                     
-                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    now_str = get_timestamp_full_str()
                     
                     if dev_id not in connected_devices:
                         connected_devices[dev_id] = {
@@ -228,7 +231,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         connected_devices[dev_id]["status"] = "active" if active_session.get("active") else "standby"
                         connected_devices[dev_id]["last_seen"] = now_str
 
-                    print(f"[EDGE] 📡 Registered: {device_name} (ID: {dev_id}, IP: {client_ip})")
+                    print(f"[EDGE] 📡 Registered: {device_name} (ID: {dev_id}, IP: {client_ip}) at {get_time_str()} IST")
                     
                     await websocket.send_json({
                         "type": "edge_ack",
@@ -247,7 +250,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     dev_id = payload.get("device_id") or assigned_device_id
                     dev_name = payload.get("device_name") or (connected_devices.get(dev_id, {}).get("device_name", "Edge Camera"))
                     
-                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    now_str = get_timestamp_full_str()
                     if dev_id not in connected_devices:
                         connected_devices[dev_id] = {
                             "device_id": dev_id,
@@ -277,8 +280,8 @@ async def websocket_endpoint(websocket: WebSocket):
                             
                             if raw_url:
                                 frame_entry = {
-                                    "timestamp": datetime.now().strftime("%H:%M:%S"),
-                                    "date": datetime.now().strftime("%Y-%m-%d"),
+                                    "timestamp": get_time_str(),
+                                    "date": get_date_str(),
                                     "url": raw_url,
                                     "device_id": dev_id,
                                     "device_name": dev_name,
