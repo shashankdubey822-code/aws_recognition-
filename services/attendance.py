@@ -2,6 +2,7 @@ import os
 import time
 import sqlite3
 import threading
+import re
 from core.config import LOG_FILE, COOL_DOWN_SEC
 from core.state import attendance_memory, last_seen, active_session, connected_devices, DB_PATH
 from core.timezone_utils import get_time_str, get_date_str, get_now
@@ -12,19 +13,38 @@ attendance_lock = threading.Lock()
 def parse_identity(raw_id: str):
     """
     Parses an AWS external ID or registered string into (name, roll_number).
-    Supported formats: 'RollNo__Name', 'Name__RollNo', 'RollNo_Name', 'Name'
+    Supported formats:
+    - 'RollNo__Name' (e.g., '24__Shashank_Dubey' -> 'Shashank Dubey', '24')
+    - 'Name__RollNo' (e.g., 'Shashank_Dubey__24' -> 'Shashank Dubey', '24')
+    - 'Shashank_Dubey' -> 'Shashank Dubey', 'N/A'
+    - 'NA__Shashank_Dubey' -> 'Shashank Dubey', 'N/A'
     """
-    if not raw_id:
+    if not raw_id or raw_id == "Unknown":
         return "Unknown", "N/A"
     
     clean_id = str(raw_id).strip()
     
     if "__" in clean_id:
         parts = clean_id.split("__", 1)
-        if any(c.isdigit() for c in parts[0]):
-            return parts[1].replace("_", " ").title(), parts[0].strip()
+        part0 = parts[0].strip()
+        part1 = parts[1].strip()
+
+        # Check if part0 is roll and part1 is name
+        if any(c.isdigit() for c in part0) or part0.upper() in ["NA", "N/A"]:
+            name = part1.replace("_", " ").title()
+            roll = part0 if any(c.isdigit() for c in part0) else "N/A"
+            return name, roll
+        # Check if part1 is roll and part0 is name
+        elif any(c.isdigit() for c in part1) or part1.upper() in ["NA", "N/A"]:
+            name = part0.replace("_", " ").title()
+            roll = part1 if any(c.isdigit() for c in part1) else "N/A"
+            return name, roll
         else:
-            return parts[0].replace("_", " ").title(), parts[1].strip()
+            # Both text
+            name = part1.replace("_", " ").title()
+            roll = part0
+            return name, roll
+            
     elif "_" in clean_id:
         parts = clean_id.split("_")
         if parts[-1].isalnum() and any(c.isdigit() for c in parts[-1]) and len(parts) > 1:
@@ -44,10 +64,11 @@ def mark_attendance(raw_identity: str, image_bytes: bytes = None, device_id: str
     """
     Marks attendance for a verified student in 24-hour IST local time.
     Tracks attendance per active session and per classroom device node.
+    Always returns: (status_bool, name, roll_number, time_str)
     """
     now_epoch = time.time()
     name, roll_number = parse_identity(raw_identity)
-    time_str = get_time_str() # 24-hour local time (e.g. 09:51:24)
+    time_str = get_time_str() # 24-hour local time (e.g. 16:45:38)
     date_str = get_date_str() # Local date (e.g. 2026-08-16)
     photo_path = None
     
@@ -67,10 +88,6 @@ def mark_attendance(raw_identity: str, image_bytes: bytes = None, device_id: str
                 (s.get('name') == name and s.get('roll_number') == roll_number) or s.get('name') == name
                 for s in connected_devices[device_id].get("verified_students", [])
             )
-
-        # If already marked in current active session, return without duplicating
-        if is_already_in_session and is_already_in_device:
-            return "already_marked", name, roll_number, time_str
 
         # 1. Save student snapshot photo safely
         if image_bytes:
@@ -95,6 +112,10 @@ def mark_attendance(raw_identity: str, image_bytes: bytes = None, device_id: str
             "photo": photo_path,
             "device_id": device_id
         }
+
+        # If already marked in current active session, still return True with student info so UI displays verification
+        if is_already_in_session and is_already_in_device:
+            return True, name, roll_number, time_str
 
         # 3. Add to In-Memory Global List (Top of list)
         attendance_memory.insert(0, entry)
@@ -135,4 +156,4 @@ def mark_attendance(raw_identity: str, image_bytes: bytes = None, device_id: str
             print(f"⚠️ DB Error: {db_err}")
 
         print(f"✅ [ATTENDANCE MARKED] {name} (Roll: {roll_number}) via {device_id} at {time_str} IST")
-        return "success", name, roll_number, time_str
+        return True, name, roll_number, time_str
