@@ -63,7 +63,7 @@ async def end_active_session(reason: str = "Teacher Manual Stop"):
     Terminates the active class session:
     1. Sends stop command to all or targeted Raspberry Pi edge nodes.
     2. Gathers verified session attendance.
-    3. Triggers asynchronous background task to compile Excel and deliver email report.
+    3. Triggers asynchronous background task to compile Excel and deliver email report via Resend HTTPS REST API.
     4. Broadcasts session completion status to all connected dashboards.
     """
     global session_timer_task
@@ -101,14 +101,18 @@ async def end_active_session(reason: str = "Teacher Manual Stop"):
         "devices": list(connected_devices.values())
     })
 
-    # Asynchronously dispatch email report via HTTPS REST API (Port 443)
-    asyncio.create_task(
-        send_session_email_report(
-            session_id=session_id,
-            attendees=attendees,
-            duration_minutes=active_session.get("duration_minutes", 50)
-        )
-    )
+    # Asynchronously dispatch email report via HTTPS REST API in thread pool
+    session_data = {
+        "id": session_id,
+        "attendees": attendees,
+        "duration_minutes": active_session.get("duration_minutes", 50)
+    }
+    
+    async def _async_email_task():
+        success, msg = await asyncio.to_thread(send_session_email_report, session_data)
+        print(f"[SESSION EMAIL] {msg}")
+
+    asyncio.create_task(_async_email_task())
 
 
 @router.websocket("/ws")
@@ -137,7 +141,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # --- 1. Multi-Device Targeted Session Control Triggers ---
                 if p_type == "start_session":
                     duration = int(payload.get("duration_minutes", 50))
-                    target_device = payload.get("target_device", "ALL")
+                    target_device = payload.get("target_device", "")
                     session_id = f"SES_{get_compact_timestamp_str()}"
                     
                     # Clean slate: Fresh session starts from 0 students
@@ -154,7 +158,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     # Reset per-device verified students and set status according to target
                     for dev_id in connected_devices:
-                        is_target = (target_device == "ALL" or target_device == dev_id)
+                        is_target = (not target_device or target_device == "ALL" or target_device == dev_id)
                         if connected_devices[dev_id]["status"] != "disconnected":
                             connected_devices[dev_id]["status"] = "active" if is_target else "standby"
                         connected_devices[dev_id]["verified_students"] = []
@@ -198,7 +202,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         "active": active_session.get("active", False),
                         "session_id": active_session.get("id"),
                         "remaining_seconds": remaining_sec,
-                        "target_device": active_session.get("target_device", "ALL"),
+                        "target_device": active_session.get("target_device", ""),
                         "total_attendees": len(active_session.get("attendees", []))
                     }))
                     continue
@@ -233,8 +237,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     print(f"[EDGE NODE] 🔌 Node connected: '{dev_name}' (ID: {dev_id}, IP: {client_ip}) at {first_time} IST")
                     
                     is_active = active_session.get("active", False)
-                    target = active_session.get("target_device", "ALL")
-                    should_stream = is_active and (target == "ALL" or target == dev_id)
+                    target = active_session.get("target_device", "")
+                    should_stream = is_active and (not target or target == "ALL" or target == dev_id)
 
                     await websocket.send_text(json.dumps({
                         "type": "edge_ack",
@@ -274,8 +278,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     dev_id = payload.get("device_id", registered_edge_id or "web_demo")
                     
                     # Only process frames if session is active (or if it's the live demo modal)
-                    target = active_session.get("target_device", "ALL")
-                    is_target = (target == "ALL" or target == dev_id)
+                    target = active_session.get("target_device", "")
+                    is_target = (not target or target == "ALL" or target == dev_id)
 
                     if not is_demo and (not active_session.get("active") or not is_target):
                         continue

@@ -72,7 +72,7 @@ def generate_session_excel(session_data: dict) -> str:
 
 def send_via_resend_api(session_data: dict, target_email: str, report_path: str) -> tuple[bool, str]:
     """Sends email via standard HTTPS REST API (Port 443) using Resend with 24h IST formatting."""
-    api_key = RESEND_API_KEY.strip()
+    api_key = (RESEND_API_KEY or "").strip()
     session_id = session_data.get("id", "LIVE_SESSION")
     attendees = session_data.get("attendees", [])
     duration = session_data.get("duration_minutes", 50)
@@ -81,6 +81,11 @@ def send_via_resend_api(session_data: dict, target_email: str, report_path: str)
     
     log_email_diagnostic("HTTPS_API", "START", f"Dispatching via Resend HTTPS REST API (Port 443) to {target_email}...")
     
+    if not api_key:
+        err_msg = "🚨 RESEND_API_KEY is empty. Please set 'RESEND_API_KEY' in Hugging Face Space Settings -> Variables and secrets."
+        log_email_diagnostic("HTTPS_API", "CONFIG_ERROR", err_msg)
+        return False, err_msg
+
     # 1. Build HTML Body
     table_rows = ""
     for idx, att in enumerate(attendees, 1):
@@ -218,8 +223,25 @@ def send_via_resend_api(session_data: dict, target_email: str, report_path: str)
         log_email_diagnostic("HTTPS_API", "FAILED", err_msg)
         return False, err_msg
 
-def send_session_email_report(session_data: dict, recipient: str = None) -> tuple[bool, str]:
-    """Primary router for sending session reports."""
+def send_session_email_report(session_data: dict = None, recipient: str = None, **kwargs) -> tuple[bool, str]:
+    """
+    Primary universal router for sending session reports.
+    Accepts either a dict `session_data` or individual kwargs (`session_id`, `attendees`, `duration_minutes`).
+    """
+    if session_data is None:
+        session_data = {
+            "id": kwargs.get("session_id", "LIVE_SESSION"),
+            "attendees": kwargs.get("attendees", []),
+            "duration_minutes": kwargs.get("duration_minutes", 50)
+        }
+    elif isinstance(session_data, dict):
+        if "id" not in session_data and "session_id" in kwargs:
+            session_data["id"] = kwargs["session_id"]
+        if "attendees" not in session_data and "attendees" in kwargs:
+            session_data["attendees"] = kwargs["attendees"]
+        if "duration_minutes" not in session_data and "duration_minutes" in kwargs:
+            session_data["duration_minutes"] = kwargs["duration_minutes"]
+
     target_email = recipient or TEACHER_REPORT_EMAIL
     session_id = session_data.get("id", "LIVE_SESSION")
     attendees = session_data.get("attendees", [])
