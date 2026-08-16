@@ -158,11 +158,22 @@ async def end_active_session(reason: str = "Teacher Manual Stop"):
         "devices": list(connected_devices.values())
     })
 
-    # 5. Asynchronously dispatch final compiled email report via HTTPS REST API
+    # 5. Gather all raw uncropped frames captured during session
+    raw_frames = list(active_session.get("session_raw_frames", []))
+    if not raw_frames:
+        for dev_id, dev_data in connected_devices.items():
+            for frm in dev_data.get("raw_frames", []):
+                u = frm.get("url", "")
+                p = u[1:] if u.startswith("/") else u
+                if p and p not in raw_frames and os.path.exists(p):
+                    raw_frames.append(p)
+
+    # 6. Asynchronously dispatch final compiled email report with Excel & full uncropped frames via HTTPS REST API
     session_data = {
         "id": session_id,
         "attendees": attendees,
-        "duration_minutes": active_session.get("duration_minutes", 50)
+        "duration_minutes": active_session.get("duration_minutes", 50),
+        "raw_frames": raw_frames
     }
     
     async def _async_email_task():
@@ -211,6 +222,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     active_session["start_time"] = time.time()
                     active_session["end_time"] = None
                     active_session["attendees"] = []
+                    active_session["session_raw_frames"] = []
                     active_session["target_device"] = target_device
                     
                     # Reset per-device verified students and set status according to target

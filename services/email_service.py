@@ -159,7 +159,7 @@ def send_via_resend_api(session_data: dict, target_email: str, report_path: str)
     # 2. Encode Attachments
     attachments = []
     
-    # Attach Excel
+    # Attach Excel Workbook
     if os.path.exists(report_path):
         with open(report_path, "rb") as f:
             b64_content = base64.b64encode(f.read()).decode("utf-8")
@@ -168,21 +168,39 @@ def send_via_resend_api(session_data: dict, target_email: str, report_path: str)
                 "content": b64_content
             })
 
-    # Attach face snapshots
-    for att in attendees:
-        photo_rel = att.get("photo")
-        if photo_rel:
-            photo_local = photo_rel[1:] if photo_rel.startswith("/") else photo_rel
-            if os.path.exists(photo_local):
-                try:
-                    with open(photo_local, "rb") as img_file:
-                        b64_img = base64.b64encode(img_file.read()).decode("utf-8")
-                        attachments.append({
-                            "filename": os.path.basename(photo_local),
-                            "content": b64_img
-                        })
-                except Exception as e:
-                    print(f"Could not attach snapshot {photo_local}: {e}")
+    # Attach ALL Uncropped Raw Surveillance Frames from Raspberry Pi
+    raw_frames = session_data.get("raw_frames", [])
+    attached_raw_count = 0
+    for frame_path in raw_frames:
+        f_local = frame_path[1:] if frame_path.startswith("/") else frame_path
+        if os.path.exists(f_local):
+            try:
+                with open(f_local, "rb") as img_file:
+                    b64_img = base64.b64encode(img_file.read()).decode("utf-8")
+                    attachments.append({
+                        "filename": os.path.basename(f_local),
+                        "content": b64_img
+                    })
+                    attached_raw_count += 1
+            except Exception as e:
+                print(f"Could not attach uncropped frame {f_local}: {e}")
+
+    # Fallback to attendee snapshots if no raw frames list was passed
+    if attached_raw_count == 0:
+        for att in attendees:
+            photo_rel = att.get("photo")
+            if photo_rel:
+                photo_local = photo_rel[1:] if photo_rel.startswith("/") else photo_rel
+                if os.path.exists(photo_local):
+                    try:
+                        with open(photo_local, "rb") as img_file:
+                            b64_img = base64.b64encode(img_file.read()).decode("utf-8")
+                            attachments.append({
+                                "filename": os.path.basename(photo_local),
+                                "content": b64_img
+                            })
+                    except Exception as e:
+                        print(f"Could not attach snapshot {photo_local}: {e}")
 
     # 3. Payload for Resend HTTPS API
     payload_data = {

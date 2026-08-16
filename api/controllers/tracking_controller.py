@@ -9,7 +9,7 @@ from services.aws_client import search_face_on_aws, register_face_to_aws
 from services.attendance import mark_attendance, parse_identity
 from services.face_detector import detect_faces_crowd
 from core.config import MIN_FACE_AREA
-from core.state import connected_devices
+from core.state import connected_devices, active_session
 from core.timezone_utils import get_time_str, get_compact_timestamp_str
 
 class TrackingController:
@@ -69,6 +69,13 @@ class TrackingController:
             connected_devices[dev_id]["total_frames"] = (connected_devices[dev_id].get("total_frames", 0)) + 1
             connected_devices[dev_id]["last_seen"] = current_time_str
             connected_devices[dev_id]["status"] = "active"
+
+        # Record into active session for email attachments
+        if active_session.get("active") or active_session.get("finishing"):
+            if "session_raw_frames" not in active_session:
+                active_session["session_raw_frames"] = []
+            if raw_filepath not in active_session["session_raw_frames"]:
+                active_session["session_raw_frames"].append(raw_filepath)
 
         # Broadcast new raw frame directly to dashboards
         await self.broadcast_event({
