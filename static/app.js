@@ -24,12 +24,14 @@ const regProgressBar = document.getElementById('reg-progress-bar');
 const startSessionBtn = document.getElementById('start-session-btn');
 const stopSessionBtn = document.getElementById('stop-session-btn');
 const sessionDurationSelect = document.getElementById('session-duration-select');
+const sessionTargetDeviceSelect = document.getElementById('session-target-device-select');
 const sessionTimerBox = document.getElementById('session-timer-box');
 const sessionTimerDisplay = document.getElementById('session-timer-display');
 const sessionStatusLabel = document.getElementById('session-status-label');
 const sessionIndicator = document.getElementById('session-indicator');
 const sessionPresentCount = document.getElementById('session-present-count');
 const statSessionStatus = document.getElementById('stat-session-status');
+const statTargetNode = document.getElementById('stat-target-node');
 const statActivePis = document.getElementById('stat-active-pis');
 const ledgerSessionIdLabel = document.getElementById('ledger-session-id-label');
 
@@ -197,6 +199,24 @@ function stopDemoCamera() {
     logToTerminal("Local webcam tester stopped and hardware released.", "info");
 }
 
+// --- UPDATE TARGET DEVICE SELECTOR DROPDOWN ---
+function updateTargetDeviceDropdown() {
+    if (!sessionTargetDeviceSelect) return;
+    const currentVal = sessionTargetDeviceSelect.value || 'ALL';
+    
+    // Clear and rebuild options
+    sessionTargetDeviceSelect.innerHTML = '<option value="ALL">🌐 All Classrooms (Broadcast)</option>';
+    
+    Object.values(allDevicesMap).forEach(dev => {
+        const opt = document.createElement('option');
+        opt.value = dev.device_id;
+        opt.textContent = `📍 ${dev.device_name} (${dev.client_ip || '127.0.0.1'})`;
+        sessionTargetDeviceSelect.appendChild(opt);
+    });
+
+    sessionTargetDeviceSelect.value = currentVal;
+}
+
 // --- DEVICES VIEW RENDERER ---
 function updateDevicesData(devicesList) {
     devicesList.forEach(dev => {
@@ -220,6 +240,7 @@ function updateDevicesData(devicesList) {
         selectedDeviceId = devices[0].device_id;
     }
 
+    updateTargetDeviceDropdown();
     renderDevicesView();
 }
 
@@ -581,7 +602,7 @@ function formatTimerDisplay(totalSeconds) {
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
-function startCountdown(durationSeconds) {
+function startCountdown(durationSeconds, targetDevice = "ALL") {
     if (sessionTimerInterval) clearInterval(sessionTimerInterval);
     sessionRemainingSeconds = durationSeconds;
     
@@ -589,7 +610,10 @@ function startCountdown(durationSeconds) {
     startSessionBtn.classList.add('hidden');
     stopSessionBtn.classList.remove('hidden');
     
-    sessionStatusLabel.textContent = "MONITORING ACTIVE";
+    const targetLabel = targetDevice === 'ALL' ? 'All Nodes' : (allDevicesMap[targetDevice]?.device_name || targetDevice);
+    if (statTargetNode) statTargetNode.textContent = targetLabel;
+
+    sessionStatusLabel.textContent = `ACTIVE (${targetLabel})`;
     sessionIndicator.className = "inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping";
     if (statSessionStatus) {
         statSessionStatus.textContent = "MONITORING ACTIVE";
@@ -624,17 +648,22 @@ function resetSessionUI() {
         statSessionStatus.textContent = "STANDBY";
         statSessionStatus.className = "text-base font-bold font-mono text-slate-700";
     }
+    if (statTargetNode) statTargetNode.textContent = "All Nodes";
 }
 
 if (startSessionBtn) {
     startSessionBtn.addEventListener('click', () => {
         const duration = parseInt(sessionDurationSelect.value) || 50;
+        const targetDevice = sessionTargetDeviceSelect ? sessionTargetDeviceSelect.value : "ALL";
+        const targetName = targetDevice === "ALL" ? "All Classrooms" : (allDevicesMap[targetDevice]?.device_name || targetDevice);
+
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({
                 type: 'start_session',
-                duration_minutes: duration
+                duration_minutes: duration,
+                target_device: targetDevice
             }));
-            logToTerminal(`[SESSION] Triggered start command (${duration} mins) to Raspberry Pis...`, 'info');
+            logToTerminal(`[SESSION] Triggered start command for [${targetName}] (${duration} mins)...`, 'info');
         } else {
             showToast("Server connection offline", "error");
         }
@@ -754,15 +783,17 @@ function connectWebSocket() {
 
         // --- SESSION MESSAGE HANDLERS ---
         if (data.type === 'session_started') {
-            startCountdown(data.duration_minutes * 60);
+            const targetDev = data.target_device || 'ALL';
+            startCountdown(data.duration_minutes * 60, targetDev);
             
             confirmedPeople.clear();
             if (confirmedList) confirmedList.innerHTML = '<div class="text-center text-slate-400 mt-20 text-sm font-mono tracking-widest">AWAITING ATTENDANCE (SCANNING VIA RASPBERRY PI)...</div>';
             if (sessionPresentCount) sessionPresentCount.textContent = '0';
             if (ledgerSessionIdLabel) ledgerSessionIdLabel.textContent = `Session: ${data.session_id}`;
 
-            showToast(`Session started (${data.duration_minutes}m) — Clean Slate`, "success");
-            logToTerminal(`[SESSION] ▶️ Fresh Session Active: ${data.session_id} (${data.duration_minutes} mins)`, "success");
+            const targetName = targetDev === 'ALL' ? 'All Classrooms' : (allDevicesMap[targetDev]?.device_name || targetDev);
+            showToast(`Session started for [${targetName}] (${data.duration_minutes}m)`, "success");
+            logToTerminal(`[SESSION] ▶️ Fresh Session Active: ${data.session_id} for [${targetName}] (${data.duration_minutes} mins)`, "success");
             return;
         }
 
@@ -775,7 +806,7 @@ function connectWebSocket() {
 
         if (data.type === 'session_status') {
             if (data.active && data.remaining_seconds > 0) {
-                startCountdown(data.remaining_seconds);
+                startCountdown(data.remaining_seconds, data.target_device || "ALL");
                 if (ledgerSessionIdLabel) ledgerSessionIdLabel.textContent = `Session: ${data.session_id}`;
                 logToTerminal(`[SESSION] Resumed active monitoring session (${Math.ceil(data.remaining_seconds/60)} mins remaining)`, "info");
             } else {

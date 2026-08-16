@@ -13,9 +13,8 @@ Features:
 - Cybersecurity Hardening:
     * HMAC-SHA256 cryptographic frame signing with timestamp + random nonce.
     * Strict Bearer Token Handshake & Replay Attack Defense.
-- Hardware Watchdog & Telemetry:
-    * Thermal, CPU load, and RAM telemetry monitoring.
-    * Auto-reconnecting hardware watchdog with jittered exponential backoff.
+- Multi-Device Targeted Activation:
+    * Responds to targeted session triggers ("ALL" or specific device ID).
 - Precise 15-second async capture loop with low-power sensor standby.
 ================================================================================
 """
@@ -297,15 +296,25 @@ class RaspberryPiEdgeClient:
 
                 if mtype in ("session_started", "edge_ack"):
                     active = data.get("session_active", True) if mtype == "edge_ack" else True
+                    target = data.get("target_device", "ALL")
                     duration = data.get("duration_minutes", 50)
                     
-                    if active and not self.session_active:
+                    # Target filter check
+                    is_targeted = (target == "ALL" or target == self.device_id or target == self.device_name)
+                    
+                    if active and is_targeted and not self.session_active:
                         self.session_active = True
-                        print(f"\n[EDGE TRIGGER] ▶️ START MONITORING COMMAND RECEIVED (Duration: {duration} mins)")
+                        print(f"\n[EDGE TRIGGER] ▶️ START MONITORING TRIGGER RECEIVED for {self.device_name} (Duration: {duration} mins)")
                         self.open_camera()
                         if self.capture_task and not self.capture_task.done():
                             self.capture_task.cancel()
                         self.capture_task = asyncio.create_task(self.streaming_loop())
+                    elif not is_targeted and self.session_active:
+                        print(f"\n[EDGE TRIGGER] ⏸️ Session started for another target ({target}). Entering standby.")
+                        self.session_active = False
+                        if self.capture_task and not self.capture_task.done():
+                            self.capture_task.cancel()
+                        self.release_camera()
 
                 elif mtype == "session_stopped":
                     print(f"\n[EDGE TRIGGER] 🛑 STOP COMMAND RECEIVED. Reason: {data.get('reason', 'N/A')}")
@@ -315,14 +324,17 @@ class RaspberryPiEdgeClient:
                     self.release_camera()
 
                 elif mtype == "session_status":
-                    if data.get("active") and not self.session_active:
+                    target = data.get("target_device", "ALL")
+                    is_targeted = (target == "ALL" or target == self.device_id or target == self.device_name)
+
+                    if data.get("active") and is_targeted and not self.session_active:
                         self.session_active = True
                         print(f"\n[EDGE TRIGGER] ▶️ Resuming active class session...")
                         self.open_camera()
                         if self.capture_task and not self.capture_task.done():
                             self.capture_task.cancel()
                         self.capture_task = asyncio.create_task(self.streaming_loop())
-                    elif not data.get("active") and self.session_active:
+                    elif (not data.get("active") or not is_targeted) and self.session_active:
                         self.session_active = False
                         if self.capture_task and not self.capture_task.done():
                             self.capture_task.cancel()
