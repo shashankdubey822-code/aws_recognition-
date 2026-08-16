@@ -41,32 +41,43 @@ def parse_identity(raw_id: str):
         return clean_id.title(), "N/A"
 
 def mark_attendance(raw_identity: str, image_bytes: bytes = None, device_id: str = "edge_device"):
-    """Business logic for attendance marking with Roll Number, Device Mapping & active session tracking."""
+    """
+    Marks attendance for a verified student.
+    Tracks attendance per active session and per classroom device node.
+    """
     now = time.time()
-    
-    if raw_identity in last_seen and (now - last_seen[raw_identity]) < COOL_DOWN_SEC:
-        return "cooldown", None, None, None
-        
-    last_seen[raw_identity] = now
-    
     name, roll_number = parse_identity(raw_identity)
     time_str = datetime.now().strftime("%H:%M:%S")
     date_str = datetime.now().strftime("%Y-%m-%d")
     photo_path = None
     
     with attendance_lock:
-        already_present = any(
-            (e.get('name') == name and e.get('roll_number') == roll_number) or e.get('name') == name
-            for e in attendance_memory
-        )
-        
-        # Save snapshot if image_bytes provided (with safe file naming)
-        if image_bytes and not already_present:
+        # Check if student is already verified in this active session
+        is_already_in_session = False
+        if active_session.get("active"):
+            is_already_in_session = any(
+                (e.get('name') == name and e.get('roll_number') == roll_number) or e.get('name') == name
+                for e in active_session.get("attendees", [])
+            )
+            
+        # Check if student is already in this specific classroom's verified list
+        is_already_in_device = False
+        if device_id in connected_devices:
+            is_already_in_device = any(
+                (s.get('name') == name and s.get('roll_number') == roll_number) or s.get('name') == name
+                for s in connected_devices[device_id].get("verified_students", [])
+            )
+
+        # If already marked in current active session, return without duplicating
+        if is_already_in_session and is_already_in_device:
+            return "already_marked", name, roll_number, time_str
+
+        # 1. Save student snapshot photo safely
+        if image_bytes:
             try:
                 os.makedirs("static/attendees", exist_ok=True)
                 timestamp_int = int(now)
                 safe_name = "".join(c for c in name if c.isalnum() or c in (' ', '_')).replace(" ", "_")
-                # Sanitize roll number so slashes like 'N/A' or '2024/CS/101' become safe filenames
                 safe_roll = "".join(c for c in roll_number if c.isalnum() or c in ('_', '-')) or "NA"
                 filename = f"static/attendees/{safe_roll}_{safe_name}_{timestamp_int}.jpg"
                 with open(filename, "wb") as f:
@@ -74,53 +85,54 @@ def mark_attendance(raw_identity: str, image_bytes: bytes = None, device_id: str
                 photo_path = f"/{filename}"
             except Exception as e:
                 print(f"⚠️ Failed to save attendee photo: {e}")
-        
-        if not already_present:
-            try:
-                # 1. Update CSV Log
-                if not os.path.exists(LOG_FILE):
-                    with open(LOG_FILE, "w", encoding="utf-8") as f:
-                        f.write("Roll Number,Name,Time,Date,Status,Device\n")
-                
-                with open(LOG_FILE, "a", encoding="utf-8") as f:
-                    f.write(f'"{roll_number}","{name}","{time_str}","{date_str}","CLEARANCE GRANTED","{device_id}"\n')
-                
-                # 2. Update SQLite Database
-                try:
-                    conn = sqlite3.connect(DB_PATH)
-                    cursor = conn.cursor()
-                    session_id = active_session["id"] if active_session.get("active") else "GENERAL"
-                    cursor.execute("INSERT INTO attendance (roll_number, name, session_id, device_id) VALUES (?, ?, ?, ?)",
-                                   (roll_number, name, session_id, device_id))
-                    conn.commit()
-                    conn.close()
-                except Exception as db_err:
-                    print(f"⚠️ DB Error: {db_err}")
-                
-                # 3. Update In-Memory Cache
-                entry = {
-                    "roll_number": roll_number,
-                    "name": name,
-                    "time": time_str,
-                    "date": date_str,
-                    "photo": photo_path,
-                    "device_id": device_id
-                }
-                attendance_memory.insert(0, entry)
-                
-                # 4. Add to current active monitoring session if running
-                if active_session.get("active"):
-                    active_session["attendees"].append(entry)
 
-                # 5. Add to Device-Specific Verified Students list
-                if device_id in connected_devices:
-                    if "verified_students" not in connected_devices[device_id]:
-                        connected_devices[device_id]["verified_students"] = []
-                    connected_devices[device_id]["verified_students"].insert(0, entry)
-                    
-                return "success", name, roll_number, time_str
-            except Exception as e:
-                print(f"🔴 Disk I/O Error: {e}")
-                return "error", name, roll_number, None
-    
-    return "already_marked", name, roll_number, time_str
+        # 2. Construct entry
+        entry = {
+            "roll_number": roll_number,
+            "name": name,
+            "time": time_str,
+            "date": date_str,
+            "photo": photo_path,
+            "device_id": device_id
+        }
+
+        # 3. Add to In-Memory Global List (Top of list)
+        attendance_memory.insert(0, entry)
+        
+        # 4. Add to Active Monitoring Session
+        if active_session.get("active"):
+            if not is_already_in_session:
+                active_session["attendees"].append(entry)
+
+        # 5. Add to Device-Specific Verified Students List
+        if device_id in connected_devices:
+            if "verified_students" not in connected_devices[device_id]:
+                connected_devices[device_id]["verified_students"] = []
+            if not is_already_in_device:
+                connected_devices[device_id]["verified_students"].insert(0, entry)
+
+        # 6. Write to CSV Log
+        try:
+            if not os.path.exists(LOG_FILE):
+                with open(LOG_FILE, "w", encoding="utf-8") as f:
+                    f.write("Roll Number,Name,Time,Date,Status,Device\n")
+            
+            with open(LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(f'"{roll_number}","{name}","{time_str}","{date_str}","CLEARANCE GRANTED","{device_id}"\n')
+        except Exception as e:
+            print(f"⚠️ CSV Write Error: {e}")
+
+        # 7. Write to SQLite Database
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            session_id = active_session["id"] if active_session.get("active") else "GENERAL"
+            cursor.execute("INSERT INTO attendance (roll_number, name, session_id, device_id) VALUES (?, ?, ?, ?)",
+                           (roll_number, name, session_id, device_id))
+            conn.commit()
+            conn.close()
+        except Exception as db_err:
+            print(f"⚠️ DB Error: {db_err}")
+
+        print(f"✅ [ATTENDANCE MARKED] {name} (Roll: {roll_number}) via {device_id} at {time_str}")
+        return "success", name, roll_number, time_str

@@ -135,7 +135,13 @@ class TrackingController:
                                 "time": s_time or "Now",
                                 "device_id": dev_id
                             })
-                            print(f"[EDGE AI] 🎓 Attendance marked: {display_name} (Roll: {roll_no}) via {dev_id}")
+                            
+                            # Broadcast updated devices ledger
+                            await self.broadcast_event({
+                                "type": "devices_update",
+                                "devices": list(connected_devices.values())
+                            })
+                            print(f"[EDGE AI] 🎓 Attendance verified and ledger updated: {display_name} (Roll: {roll_no}) via {dev_id}")
                     else:
                         q_item["status"] = "no_match"
                         q_item["name"] = "Unknown Entity"
