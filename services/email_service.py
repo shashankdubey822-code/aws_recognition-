@@ -171,8 +171,8 @@ def send_via_resend_api(session_data: dict, target_email: str, report_path: str)
     # Attach face snapshots
     for att in attendees:
         photo_rel = att.get("photo")
-        if photo_rel and photo_rel.startswith("/"):
-            photo_local = photo_rel[1:]
+        if photo_rel:
+            photo_local = photo_rel[1:] if photo_rel.startswith("/") else photo_rel
             if os.path.exists(photo_local):
                 try:
                     with open(photo_local, "rb") as img_file:

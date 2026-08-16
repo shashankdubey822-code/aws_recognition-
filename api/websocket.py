@@ -97,12 +97,9 @@ async def end_active_session(reason: str = "Teacher Manual Stop"):
         session_timer_task.cancel()
         session_timer_task = None
 
-    if not active_session.get("active"):
-        return
-
     session_id = active_session.get("id", f"SES_{get_compact_timestamp_str()}")
     active_session["active"] = False
-    active_session["end_time"] = time.time()
+    active_session["finishing"] = True
 
     print(f"[SESSION] 🛑 Concluding session {session_id}. Reason: {reason}. Waiting for in-flight face scans (24h IST: {get_time_str()})...")
 
@@ -118,8 +115,31 @@ async def end_active_session(reason: str = "Teacher Manual Stop"):
     # 2. FLUSH IN-FLIGHT SCANS: Guarantee every detected face gets labeled before email is built
     await wait_for_in_flight_aws_scans(max_wait_seconds=6.0)
 
-    # 3. Gather final attendees after all in-flight scans have verified
-    attendees = list(active_session.get("attendees", []))
+    # 3. Consolidate final verified attendees from session state and connected device logs
+    attendee_map = {}
+    for att in active_session.get("attendees", []):
+        if att.get("name") and att.get("name") != "Unknown":
+            k = (att.get("name"), att.get("roll_number"))
+            attendee_map[k] = att
+
+    for dev_id, dev_data in connected_devices.items():
+        for st in dev_data.get("verified_students", []):
+            if st.get("name") and st.get("name") != "Unknown":
+                k = (st.get("name"), st.get("roll_number"))
+                if k not in attendee_map:
+                    attendee_map[k] = {
+                        "roll_number": st.get("roll_number", "N/A"),
+                        "name": st.get("name"),
+                        "time": st.get("time", get_time_str()),
+                        "date": get_date_str(),
+                        "photo": st.get("photo", ""),
+                        "device_id": dev_data.get("device_name", dev_id)
+                    }
+
+    attendees = list(attendee_map.values())
+    active_session["attendees"] = attendees
+    active_session["finishing"] = False
+    active_session["end_time"] = time.time()
 
     # 4. Broadcast final stop status to UI
     await broadcast_json({

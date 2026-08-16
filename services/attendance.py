@@ -121,7 +121,7 @@ def mark_attendance(raw_identity: str, image_bytes: bytes = None, device_id: str
         attendance_memory.insert(0, entry)
         
         # 4. Add to Active Monitoring Session
-        if active_session.get("active"):
+        if active_session.get("active") or active_session.get("finishing"):
             if not is_already_in_session:
                 active_session["attendees"].append(entry)
 
