@@ -25,12 +25,10 @@ from core.timezone_utils import (
     get_timestamp_full_str,
     get_compact_timestamp_str
 )
-from services.face_detection import get_face_detector
-from services.aws_rekognition import search_face_in_collection
 from services.attendance import mark_attendance
 from services.email_service import send_session_email_report
-from api.controllers.registration_controller import process_registration_frame
-from api.controllers.tracking_controller import process_tracking_frame
+from api.controllers.registration_controller import RegistrationController
+from api.controllers.tracking_controller import TrackingController
 
 router = APIRouter()
 
@@ -119,6 +117,9 @@ async def websocket_endpoint(websocket: WebSocket):
     
     await websocket.accept()
     active_connections.add(websocket)
+    
+    reg_controller = RegistrationController(websocket)
+    tracking_controller = TrackingController(websocket, broadcast_func=broadcast_json)
     
     registered_edge_id = None
     client_ip = websocket.client.host if websocket.client else "127.0.0.1"
@@ -259,8 +260,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 # --- 4. Biometric Student 3D Scanning ---
-                if p_type in ("start_registration", "register_frame"):
-                    await process_registration_frame(websocket, payload)
+                if p_type == "start_registration":
+                    reg_controller.start_registration(payload)
+                    continue
+
+                if p_type == "register_frame":
+                    await reg_controller.process_frame(payload)
                     continue
 
                 # --- 5. Surveillance Tracking Frame Ingestion ---
@@ -275,7 +280,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     if not is_demo and (not active_session.get("active") or not is_target):
                         continue
 
-                    await process_tracking_frame(websocket, payload, registered_edge_id, client_ip)
+                    await tracking_controller.process_frame(payload)
                     continue
 
                 if p_type == "heartbeat":
