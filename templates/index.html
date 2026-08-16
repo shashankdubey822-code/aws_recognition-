@@ -223,25 +223,25 @@
 
                     <!-- Session Action Controls with Target Node Selector -->
                     <div class="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-200/80">
-                        <!-- Target Device Node Selector Dropdown -->
+                        <!-- Target Device Node Selector Dropdown (Strict Connected Nodes Only) -->
                         <div class="flex items-center gap-2">
-                            <label for="session-target-device-select" class="text-xs font-mono text-slate-600 font-semibold whitespace-nowrap">Target Node:</label>
+                            <label for="session-target-device-select" class="text-xs font-mono text-slate-600 font-semibold whitespace-nowrap">Target Classroom:</label>
                             <select id="session-target-device-select" class="glass-input text-xs font-mono px-3 py-2 rounded-xl focus:outline-none font-bold text-sky-800">
-                                <option value="ALL">🌐 All Classrooms (Broadcast)</option>
+                                <option value="" disabled selected>-- No Active Camera Connected --</option>
                             </select>
                         </div>
 
-                        <!-- Duration Selector -->
+                        <!-- Duration Selector (Updated 100 Mins for Lab) -->
                         <div class="flex items-center gap-2">
                             <label for="session-duration-select" class="text-xs font-mono text-slate-600 font-semibold whitespace-nowrap">Duration:</label>
                             <select id="session-duration-select" class="glass-input text-xs font-mono px-3 py-2 rounded-xl focus:outline-none font-bold text-slate-700">
-                                <option value="2">2 Mins (Demo)</option>
+                                <option value="2">2 Mins (Quick Demo)</option>
                                 <option value="15">15 Mins</option>
                                 <option value="30">30 Mins</option>
                                 <option value="45">45 Mins</option>
-                                <option value="50" selected>50 Mins (Class)</option>
-                                <option value="60">60 Mins (1 Hour)</option>
-                                <option value="90">90 Mins (Lab)</option>
+                                <option value="50">50 Mins (Standard Lecture)</option>
+                                <option value="60" selected>60 Mins (1 Hour Class)</option>
+                                <option value="100">100 Mins (Extended Lab Session)</option>
                             </select>
                         </div>
 
@@ -272,7 +272,7 @@
                     </div>
                     <div class="mt-2">
                         <div id="stat-session-status" class="text-base font-bold font-mono text-slate-700">STANDBY</div>
-                        <div class="text-[11px] text-slate-500 font-mono mt-1">Target: <span id="stat-target-node" class="text-sky-700 font-bold">All Nodes</span></div>
+                        <div class="text-[11px] text-slate-500 font-mono mt-1">Target: <span id="stat-target-node" class="text-sky-700 font-bold">None Selected</span></div>
                     </div>
                 </div>
 

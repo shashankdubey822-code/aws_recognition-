@@ -199,22 +199,36 @@ function stopDemoCamera() {
     logToTerminal("Local webcam tester stopped and hardware released.", "info");
 }
 
-// --- UPDATE TARGET DEVICE SELECTOR DROPDOWN ---
+// --- UPDATE TARGET DEVICE SELECTOR DROPDOWN (CONNECTED ONLY) ---
 function updateTargetDeviceDropdown() {
     if (!sessionTargetDeviceSelect) return;
-    const currentVal = sessionTargetDeviceSelect.value || 'ALL';
+    const currentVal = sessionTargetDeviceSelect.value;
     
-    // Clear and rebuild options
-    sessionTargetDeviceSelect.innerHTML = '<option value="ALL">🌐 All Classrooms (Broadcast)</option>';
+    const availableDevices = Object.values(allDevicesMap).filter(d => d.status !== 'disconnected');
+    sessionTargetDeviceSelect.innerHTML = '';
     
-    Object.values(allDevicesMap).forEach(dev => {
+    if (availableDevices.length === 0) {
+        const opt = document.createElement('option');
+        opt.value = "";
+        opt.textContent = "-- No Active Camera Connected --";
+        opt.disabled = true;
+        opt.selected = true;
+        sessionTargetDeviceSelect.appendChild(opt);
+        return;
+    }
+
+    availableDevices.forEach((dev, idx) => {
         const opt = document.createElement('option');
         opt.value = dev.device_id;
         opt.textContent = `📍 ${dev.device_name} (${dev.client_ip || '127.0.0.1'})`;
         sessionTargetDeviceSelect.appendChild(opt);
     });
 
-    sessionTargetDeviceSelect.value = currentVal;
+    if (currentVal && availableDevices.some(d => d.device_id === currentVal)) {
+        sessionTargetDeviceSelect.value = currentVal;
+    } else {
+        sessionTargetDeviceSelect.selectedIndex = 0;
+    }
 }
 
 // --- DEVICES VIEW RENDERER ---
@@ -602,7 +616,7 @@ function formatTimerDisplay(totalSeconds) {
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
-function startCountdown(durationSeconds, targetDevice = "ALL") {
+function startCountdown(durationSeconds, targetDevice = "") {
     if (sessionTimerInterval) clearInterval(sessionTimerInterval);
     sessionRemainingSeconds = durationSeconds;
     
@@ -610,7 +624,7 @@ function startCountdown(durationSeconds, targetDevice = "ALL") {
     startSessionBtn.classList.add('hidden');
     stopSessionBtn.classList.remove('hidden');
     
-    const targetLabel = targetDevice === 'ALL' ? 'All Nodes' : (allDevicesMap[targetDevice]?.device_name || targetDevice);
+    const targetLabel = allDevicesMap[targetDevice]?.device_name || targetDevice || 'Classroom Node';
     if (statTargetNode) statTargetNode.textContent = targetLabel;
 
     sessionStatusLabel.textContent = `ACTIVE (${targetLabel})`;
@@ -648,14 +662,21 @@ function resetSessionUI() {
         statSessionStatus.textContent = "STANDBY";
         statSessionStatus.className = "text-base font-bold font-mono text-slate-700";
     }
-    if (statTargetNode) statTargetNode.textContent = "All Nodes";
+    if (statTargetNode) statTargetNode.textContent = "None Selected";
 }
 
 if (startSessionBtn) {
     startSessionBtn.addEventListener('click', () => {
-        const duration = parseInt(sessionDurationSelect.value) || 50;
-        const targetDevice = sessionTargetDeviceSelect ? sessionTargetDeviceSelect.value : "ALL";
-        const targetName = targetDevice === "ALL" ? "All Classrooms" : (allDevicesMap[targetDevice]?.device_name || targetDevice);
+        const targetDevice = sessionTargetDeviceSelect ? sessionTargetDeviceSelect.value : "";
+        
+        if (!targetDevice) {
+            showToast("No active Raspberry Pi node is connected. Please connect a camera first.", "warning");
+            logToTerminal("[SESSION] ❌ Start aborted: No edge camera node selected or online.", "warning");
+            return;
+        }
+
+        const duration = parseInt(sessionDurationSelect.value) || 60;
+        const targetName = allDevicesMap[targetDevice]?.device_name || targetDevice;
 
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({
@@ -783,7 +804,7 @@ function connectWebSocket() {
 
         // --- SESSION MESSAGE HANDLERS ---
         if (data.type === 'session_started') {
-            const targetDev = data.target_device || 'ALL';
+            const targetDev = data.target_device || '';
             startCountdown(data.duration_minutes * 60, targetDev);
             
             confirmedPeople.clear();
@@ -791,7 +812,7 @@ function connectWebSocket() {
             if (sessionPresentCount) sessionPresentCount.textContent = '0';
             if (ledgerSessionIdLabel) ledgerSessionIdLabel.textContent = `Session: ${data.session_id}`;
 
-            const targetName = targetDev === 'ALL' ? 'All Classrooms' : (allDevicesMap[targetDev]?.device_name || targetDev);
+            const targetName = allDevicesMap[targetDev]?.device_name || targetDev || 'Classroom Node';
             showToast(`Session started for [${targetName}] (${data.duration_minutes}m)`, "success");
             logToTerminal(`[SESSION] ▶️ Fresh Session Active: ${data.session_id} for [${targetName}] (${data.duration_minutes} mins)`, "success");
             return;
@@ -806,7 +827,7 @@ function connectWebSocket() {
 
         if (data.type === 'session_status') {
             if (data.active && data.remaining_seconds > 0) {
-                startCountdown(data.remaining_seconds, data.target_device || "ALL");
+                startCountdown(data.remaining_seconds, data.target_device || "");
                 if (ledgerSessionIdLabel) ledgerSessionIdLabel.textContent = `Session: ${data.session_id}`;
                 logToTerminal(`[SESSION] Resumed active monitoring session (${Math.ceil(data.remaining_seconds/60)} mins remaining)`, "info");
             } else {
