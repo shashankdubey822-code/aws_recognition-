@@ -58,12 +58,10 @@ def get_system_telemetry() -> dict:
     """Reads Raspberry Pi hardware telemetry (CPU temp, load)."""
     telemetry = {"temp_c": 0.0, "load_1m": 0.0}
     try:
-        # Read Raspberry Pi CPU temperature
         temp_path = "/sys/class/thermal/thermal_zone0/temp"
         if os.path.exists(temp_path):
             with open(temp_path, "r") as f:
                 telemetry["temp_c"] = round(int(f.read().strip()) / 1000.0, 1)
-        # Read 1-minute load average
         telemetry["load_1m"] = round(os.getloadavg()[0], 2)
     except Exception:
         pass
@@ -96,14 +94,10 @@ def enhance_frame_advanced(frame):
     4. Unsharp Masking for Ultra-Sharp Facial Contours
     """
     try:
-        # Step 1: Color balance
         balanced = auto_white_balance(frame)
-        
-        # Step 2: Compute scene luminance
         gray = cv2.cvtColor(balanced, cv2.COLOR_BGR2GRAY)
         mean_lum = float(np.mean(gray))
 
-        # Step 3: LAB Space Contrast Equalization
         lab = cv2.cvtColor(balanced, cv2.COLOR_BGR2LAB)
         l_channel, a_channel, b_channel = cv2.split(lab)
 
@@ -111,7 +105,6 @@ def enhance_frame_advanced(frame):
         clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
         enhanced_l = clahe.apply(l_channel)
 
-        # Step 4: Dynamic Shadow Gamma Correction
         if mean_lum < 100:
             gamma = 0.52 if mean_lum < 40 else 0.70
             inv_gamma = 1.0 / gamma
@@ -121,7 +114,6 @@ def enhance_frame_advanced(frame):
         merged_lab = cv2.merge((enhanced_l, a_channel, b_channel))
         contrast_boosted = cv2.cvtColor(merged_lab, cv2.COLOR_LAB2BGR)
 
-        # Step 5: Unsharp Mask for Edge & Facial Landmark Definition
         gaussian_blur = cv2.GaussianBlur(contrast_boosted, (0, 0), 2.0)
         sharpened = cv2.addWeighted(contrast_boosted, 1.35, gaussian_blur, -0.35, 0)
 
@@ -133,6 +125,49 @@ def generate_hmac_signature(secret_key: str, payload_str: str, timestamp_str: st
     """Computes HMAC-SHA256 signature for payload verification."""
     message = f"{timestamp_str}:{nonce}:{payload_str}"
     return hmac.new(secret_key.encode('utf-8'), message.encode('utf-8'), hashlib.sha256).hexdigest()
+
+def connect_websocket_universal(url: str, hf_token: str = None):
+    """
+    Universal WebSocket connection helper compatible across ALL websockets versions (10.x, 11.x, 12.x, 13.x, 14.x).
+    """
+    target_url = url
+    if hf_token and "token=" not in url:
+        sep = "&" if "?" in url else "?"
+        target_url = f"{url}{sep}token={hf_token}"
+    
+    headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
+    
+    # Try 1: websockets >= 13 (additional_headers)
+    try:
+        return websockets.connect(
+            target_url, 
+            additional_headers=headers, 
+            ping_interval=15, 
+            ping_timeout=20, 
+            max_size=20 * 1024 * 1024
+        )
+    except TypeError:
+        pass
+
+    # Try 2: websockets < 13 (extra_headers)
+    try:
+        return websockets.connect(
+            target_url, 
+            extra_headers=headers, 
+            ping_interval=15, 
+            ping_timeout=20, 
+            max_size=20 * 1024 * 1024
+        )
+    except TypeError:
+        pass
+
+    # Try 3: Standard (URL token authentication)
+    return websockets.connect(
+        target_url, 
+        ping_interval=15, 
+        ping_timeout=20, 
+        max_size=20 * 1024 * 1024
+    )
 
 class RaspberryPiEdgeClient:
     def __init__(self, server_url: str, device_name: str, device_id: str, hf_token: str = None, 
@@ -172,7 +207,6 @@ class RaspberryPiEdgeClient:
                 pass
                 
             if self.cap.isOpened():
-                # Flush initial sensor warmup frames
                 for _ in range(5):
                     self.cap.read()
                 print("✅ HD Camera sensor stabilized and ready.")
@@ -299,10 +333,6 @@ class RaspberryPiEdgeClient:
 
     async def run(self):
         """Main lifecycle manager with exponential backoff & auto-reconnect watchdog."""
-        headers = {}
-        if self.hf_token:
-            headers["Authorization"] = f"Bearer {self.hf_token}"
-
         print("=" * 72)
         print("   NEXUS AI — CYBER-SECURE ULTRA-HDR RASPBERRY PI DAEMON (v3.0)")
         print(f"   Device Name  : {self.device_name} (ID: {self.device_id})")
@@ -319,13 +349,7 @@ class RaspberryPiEdgeClient:
             try:
                 print(f"[EDGE] 🔗 Connecting to secure central hub at {self.server_url}...")
                 
-                async with websockets.connect(
-                    self.server_url, 
-                    extra_headers=headers,
-                    ping_interval=15, 
-                    ping_timeout=20,
-                    max_size=20 * 1024 * 1024
-                ) as ws:
+                async with connect_websocket_universal(self.server_url, self.hf_token) as ws:
                     self.ws = ws
                     retry_count = 0
                     print("✅ Secure WebSocket link established. Registering edge device node...")
