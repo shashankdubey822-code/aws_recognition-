@@ -55,15 +55,22 @@ class RegistrationController:
 
         face = faces[0]
         
-        # Environmental Coaching
+        # Environmental Coaching & Live Telemetry
         brightness = face.get("brightness", 100)
         blur = face.get("blur", 100)
+        telemetry = {
+            "brightness": round(brightness, 1),
+            "blur": round(blur, 1),
+            "confidence": round(face.get("confidence", 0.95) * 100, 1)
+        }
+
         if brightness < 40:
             await self.websocket.send_json({
                 "type": "registration_waiting", 
                 "step": "environmental",
                 "message": "⚠️ Lighting too dark. Move to a brighter area.", 
-                "progress": int((self.session["frames"]/20)*100)
+                "progress": int((self.session["frames"]/20)*100),
+                "telemetry": telemetry
             })
             return
         if blur < 50:
@@ -71,7 +78,8 @@ class RegistrationController:
                 "type": "registration_waiting", 
                 "step": "environmental",
                 "message": "⚠️ Camera out of focus / motion blur. Please hold still.", 
-                "progress": int((self.session["frames"]/20)*100)
+                "progress": int((self.session["frames"]/20)*100),
+                "telemetry": telemetry
             })
             return
 
@@ -94,7 +102,8 @@ class RegistrationController:
                         "step": "pose_liveness",
                         "direction": "CENTER",
                         "message": "🎯 Maintain Center Lock. Look straight ahead.", 
-                        "progress": int((frames/20)*100)
+                        "progress": int((frames/20)*100),
+                        "telemetry": telemetry
                     })
                     return
             else:
@@ -112,7 +121,8 @@ class RegistrationController:
                             "step": "pose_liveness",
                             "direction": "LEFT",
                             "message": "⬅️ Turn head slightly LEFT to capture side profile...", 
-                            "progress": int((frames/20)*100)
+                            "progress": int((frames/20)*100),
+                            "telemetry": telemetry
                         })
                         return
                 elif current_challenge == "RIGHT":
@@ -122,7 +132,8 @@ class RegistrationController:
                             "step": "pose_liveness",
                             "direction": "RIGHT",
                             "message": "➡️ Turn head slightly RIGHT to capture side profile...", 
-                            "progress": int((frames/20)*100)
+                            "progress": int((frames/20)*100),
+                            "telemetry": telemetry
                         })
                         return
                 elif current_challenge == "UP":
@@ -132,7 +143,8 @@ class RegistrationController:
                             "step": "pose_liveness",
                             "direction": "UP",
                             "message": "⬆️ Tilt head slightly UP to capture chin & jaw profile...", 
-                            "progress": int((frames/20)*100)
+                            "progress": int((frames/20)*100),
+                            "telemetry": telemetry
                         })
                         return
                 elif current_challenge == "DOWN":
@@ -142,7 +154,8 @@ class RegistrationController:
                             "step": "pose_liveness",
                             "direction": "DOWN",
                             "message": "⬇️ Tilt head slightly DOWN to complete 3D angle map...", 
-                            "progress": int((frames/20)*100)
+                            "progress": int((frames/20)*100),
+                            "telemetry": telemetry
                         })
                         return
 
@@ -191,7 +204,8 @@ class RegistrationController:
                 "step": "indexing",
                 "message": f"Biometric Angle {self.session['frames']}/20 Vector Secured ✓", 
                 "angle": self.session["frames"],
-                "progress": progress
+                "progress": progress,
+                "telemetry": telemetry
             })
             
             if self.session["frames"] >= 20:

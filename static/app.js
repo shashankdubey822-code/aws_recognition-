@@ -914,6 +914,45 @@ if (clearCacheBtn) {
     });
 }
 
+// --- NETWORK LATENCY MONITORING ---
+let pingStartTime = 0;
+let liveLatencyMs = 0;
+const modalLatencyBadge = document.getElementById('modal-latency-badge');
+const modalLatencyDot = document.getElementById('modal-latency-dot');
+const modalLatencyText = document.getElementById('modal-latency-text');
+const regTelemetryBrightness = document.getElementById('reg-telemetry-brightness');
+const regTelemetryBlur = document.getElementById('reg-telemetry-blur');
+const regTelemetryDistance = document.getElementById('reg-telemetry-distance');
+const regTelemetryRtt = document.getElementById('reg-telemetry-rtt');
+
+function updateLatencyDisplay(ms) {
+    liveLatencyMs = ms;
+    if (regTelemetryRtt) regTelemetryRtt.textContent = `${ms} ms`;
+    
+    if (!modalLatencyBadge || !modalLatencyDot || !modalLatencyText) return;
+    
+    if (ms < 80) {
+        modalLatencyDot.className = 'w-2 h-2 rounded-full bg-emerald-500 animate-pulse';
+        modalLatencyBadge.className = 'px-2.5 sm:px-3 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] sm:text-xs font-mono font-bold flex items-center gap-1.5 text-emerald-800 transition-all shadow-sm';
+        modalLatencyText.textContent = `RTT: ${ms}ms (Optimal)`;
+    } else if (ms < 250) {
+        modalLatencyDot.className = 'w-2 h-2 rounded-full bg-amber-500 animate-pulse';
+        modalLatencyBadge.className = 'px-2.5 sm:px-3 py-1 rounded-xl bg-amber-50 border border-amber-200 text-[11px] sm:text-xs font-mono font-bold flex items-center gap-1.5 text-amber-800 transition-all shadow-sm';
+        modalLatencyText.textContent = `RTT: ${ms}ms (Normal)`;
+    } else {
+        modalLatencyDot.className = 'w-2 h-2 rounded-full bg-rose-500 animate-ping';
+        modalLatencyBadge.className = 'px-2.5 sm:px-3 py-1 rounded-xl bg-rose-50 border border-rose-200 text-[11px] sm:text-xs font-mono font-bold flex items-center gap-1.5 text-rose-800 transition-all shadow-sm';
+        modalLatencyText.textContent = `RTT: ${ms}ms (High Lag / Slow Link)`;
+    }
+}
+
+function sendLatencyPing() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        pingStartTime = performance.now();
+        ws.send(JSON.stringify({ type: 'ping', client_time: pingStartTime }));
+    }
+}
+
 // --- WEBSOCKET CONNECTION ---
 function connectWebSocket() {
     ws = new WebSocket(wsUrl);
@@ -932,14 +971,29 @@ function connectWebSocket() {
         
         ws.send(JSON.stringify({ type: 'get_session_status' }));
         ws.send(JSON.stringify({ type: 'get_devices' }));
+        sendLatencyPing();
         
+        if (pingInterval) clearInterval(pingInterval);
         pingInterval = setInterval(() => { 
-            if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'heartbeat' })); 
-        }, 10000);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                sendLatencyPing();
+            }
+        }, 2000);
     };
 
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
+
+        if (data.type === 'pong') {
+            if (data.client_time) {
+                const rtt = Math.max(1, Math.round(performance.now() - data.client_time));
+                updateLatencyDisplay(rtt);
+            } else if (pingStartTime > 0) {
+                const rtt = Math.max(1, Math.round(performance.now() - pingStartTime));
+                updateLatencyDisplay(rtt);
+            }
+            return;
+        }
 
         if (data.type === 'error') {
             isProcessing = false;
@@ -1049,6 +1103,23 @@ function connectWebSocket() {
             isProcessing = false;
             if (regLiveStatusLabel) regLiveStatusLabel.textContent = data.message;
 
+            if (data.telemetry) {
+                const b = data.telemetry.brightness;
+                const bl = data.telemetry.blur;
+                if (regTelemetryBrightness && b !== undefined) {
+                    regTelemetryBrightness.textContent = b > 50 ? `Good (${Math.round(b)}%)` : `Dim (${Math.round(b)}%)`;
+                    regTelemetryBrightness.className = b > 50 ? 'text-[11px] font-mono font-extrabold text-emerald-600 mt-0.5' : 'text-[11px] font-mono font-extrabold text-amber-600 mt-0.5';
+                }
+                if (regTelemetryBlur && bl !== undefined) {
+                    regTelemetryBlur.textContent = bl > 60 ? `Sharp (${Math.round(bl)})` : `Soft (${Math.round(bl)})`;
+                    regTelemetryBlur.className = bl > 60 ? 'text-[11px] font-mono font-extrabold text-sky-600 mt-0.5' : 'text-[11px] font-mono font-extrabold text-amber-600 mt-0.5';
+                }
+                if (regTelemetryDistance) {
+                    regTelemetryDistance.textContent = 'Aligned';
+                    regTelemetryDistance.className = 'text-[11px] font-mono font-extrabold text-emerald-600 mt-0.5';
+                }
+            }
+
             if (data.direction) {
                 if (regDirectionText) regDirectionText.textContent = data.direction === 'CENTER' ? 'LOOK STRAIGHT' : `TURN ${data.direction}`;
                 if (regDirectionIndicator) {
@@ -1086,6 +1157,19 @@ function connectWebSocket() {
             if (regProgressPercent) regProgressPercent.textContent = `${regProgress}%`;
             if (regAngleCounter) regAngleCounter.textContent = data.angle || Math.round((regProgress/100)*20);
             if (regLiveStatusLabel) regLiveStatusLabel.textContent = data.message;
+
+            if (data.telemetry) {
+                const b = data.telemetry.brightness;
+                const bl = data.telemetry.blur;
+                if (regTelemetryBrightness && b !== undefined) {
+                    regTelemetryBrightness.textContent = `Optimal (${Math.round(b)}%)`;
+                    regTelemetryBrightness.className = 'text-[11px] font-mono font-extrabold text-emerald-600 mt-0.5';
+                }
+                if (regTelemetryBlur && bl !== undefined) {
+                    regTelemetryBlur.textContent = `Clear (${Math.round(bl)})`;
+                    regTelemetryBlur.className = 'text-[11px] font-mono font-extrabold text-sky-600 mt-0.5';
+                }
+            }
 
             setDiagStep(3, 'success', 'Face geometry & lighting approved');
             setDiagStep(4, 'success', 'No duplicate enrolment conflict');

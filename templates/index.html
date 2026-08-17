@@ -521,9 +521,15 @@
                         <p class="text-xs text-slate-500 font-mono">Live Diagnostic Pipeline & Cloud Vector Indexing</p>
                     </div>
                 </div>
-                <button id="cancel-btn" class="px-3.5 py-1.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 text-xs font-mono font-bold transition-all">
-                    ✕ CLOSE
-                </button>
+                <div class="flex items-center gap-2 sm:gap-3">
+                    <div id="modal-latency-badge" class="px-2.5 sm:px-3 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] sm:text-xs font-mono font-bold flex items-center gap-1.5 text-emerald-800 transition-all shadow-sm">
+                        <span id="modal-latency-dot" class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <span id="modal-latency-text">RTT: -- ms</span>
+                    </div>
+                    <button id="cancel-btn" class="px-3 py-1 sm:px-3.5 sm:py-1.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 text-xs font-mono font-bold transition-all">
+                        ✕ CLOSE
+                    </button>
+                </div>
             </div>
 
             <!-- View 1: Credentials Input Form -->
@@ -592,6 +598,26 @@
                         </div>
                         <div class="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
                             <div id="reg-progress-bar" class="bg-gradient-to-r from-sky-500 to-emerald-500 h-full w-0 transition-all duration-200"></div>
+                        </div>
+                    </div>
+
+                    <!-- Live Optical & Environmental Telemetry HUD -->
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-0.5">
+                        <div class="p-2 rounded-xl bg-white/90 border border-slate-200 shadow-sm flex flex-col">
+                            <span class="text-[9px] font-mono font-bold text-slate-400 uppercase">💡 Lighting</span>
+                            <span id="reg-telemetry-brightness" class="text-[11px] font-mono font-extrabold text-emerald-600 mt-0.5">Good</span>
+                        </div>
+                        <div class="p-2 rounded-xl bg-white/90 border border-slate-200 shadow-sm flex flex-col">
+                            <span class="text-[9px] font-mono font-bold text-slate-400 uppercase">🔍 Sharpness</span>
+                            <span id="reg-telemetry-blur" class="text-[11px] font-mono font-extrabold text-sky-600 mt-0.5">Clear</span>
+                        </div>
+                        <div class="p-2 rounded-xl bg-white/90 border border-slate-200 shadow-sm flex flex-col">
+                            <span class="text-[9px] font-mono font-bold text-slate-400 uppercase">🎯 Alignment</span>
+                            <span id="reg-telemetry-distance" class="text-[11px] font-mono font-extrabold text-slate-800 mt-0.5">Centered</span>
+                        </div>
+                        <div class="p-2 rounded-xl bg-white/90 border border-slate-200 shadow-sm flex flex-col">
+                            <span class="text-[9px] font-mono font-bold text-slate-400 uppercase">🌐 Latency</span>
+                            <span id="reg-telemetry-rtt" class="text-[11px] font-mono font-extrabold text-emerald-600 mt-0.5">-- ms</span>
                         </div>
                     </div>
                 </div>
@@ -728,6 +754,6 @@
     </div>
 
     <!-- Main Logic Script (Cache Busted) -->
-    <script src="/static/app.js?v=20260817_02"></script>
+    <script src="/static/app.js?v=20260818_03"></script>
 </body>
 </html>

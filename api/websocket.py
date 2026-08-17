@@ -396,8 +396,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     await tracking_controller.process_frame(payload)
                     continue
 
-                if p_type == "heartbeat":
-                    await websocket.send_text(json.dumps({"type": "pong", "time": get_time_str()}))
+                if p_type in ("heartbeat", "ping"):
+                    await websocket.send_text(json.dumps({
+                        "type": "pong", 
+                        "client_time": payload.get("client_time"), 
+                        "time": get_time_str()
+                    }))
                     continue
 
             except json.JSONDecodeError:
