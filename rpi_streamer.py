@@ -190,25 +190,37 @@ class RaspberryPiEdgeClient:
         self.capture_task = None
 
     def open_camera(self) -> bool:
-        """Initializes HD hardware video sensor with MJPEG hardware decoding."""
+        """Initializes HD hardware video sensor with low-latency zero-buffer configuration."""
         if self.cap is not None and self.cap.isOpened():
             return True
         print(f"[EDGE CAMERA] 📷 Initializing HD Camera Hardware (Index {self.camera_index}, {self.width}x{self.height})...")
         try:
-            self.cap = cv2.VideoCapture(self.camera_index)
+            # Prefer V4L2 backend on Linux for direct low-latency hardware access
+            if hasattr(cv2, 'CAP_V4L2') and sys.platform.startswith('linux'):
+                self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_V4L2)
+            else:
+                self.cap = cv2.VideoCapture(self.camera_index)
+
             self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
             
+            # Enforce hardware buffer depth to strictly 1 frame to eliminate stale buffer lag
+            try:
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            except Exception:
+                pass
+
             try:
                 self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
             except Exception:
                 pass
                 
             if self.cap.isOpened():
+                # Flush startup frames for sensor calibration
                 for _ in range(5):
                     self.cap.read()
-                print("✅ HD Camera sensor stabilized and ready.")
+                print("✅ HD Camera sensor stabilized and ready (Zero-Buffer Live Mode).")
                 return True
             else:
                 print(f"❌ Could not open video device on index {self.camera_index}.")
@@ -228,15 +240,25 @@ class RaspberryPiEdgeClient:
             print("🛑 Camera released. Device in low-power STANDBY mode.")
 
     def capture_frame_base64(self) -> str | None:
-        """Captures an enhanced HD frame and encodes it in 95% JPEG quality."""
+        """Captures a fresh real-time enhanced HD frame with hardware buffer flush."""
         if not self.cap or not self.cap.isOpened():
             if not self.open_camera():
                 return None
         
-        ret, frame = self.cap.read()
+        # Flush stale hardware buffer frames accumulated during the sleep interval
+        try:
+            for _ in range(4):
+                self.cap.grab()
+            ret, frame = self.cap.retrieve()
+        except Exception:
+            ret, frame = self.cap.read()
+
         if not ret or frame is None:
-            print("⚠️ Hardware buffer empty — re-stabilizing sensor...")
-            return None
+            # Second attempt via direct read
+            ret, frame = self.cap.read()
+            if not ret or frame is None:
+                print("⚠️ Hardware buffer empty — re-stabilizing sensor...")
+                return None
         
         # Apply Multi-Stage Advanced Image Pipeline
         enhanced = enhance_frame_advanced(frame)
@@ -250,7 +272,10 @@ class RaspberryPiEdgeClient:
         return f"data:image/jpeg;base64,{b64_str}"
 
     async def streaming_loop(self):
-        """Streams 1 cryptographically-signed HD frame strictly every interval seconds."""
+        """Streams 1 cryptographically-signed HD frame strictly every interval seconds with task lock."""
+        if getattr(self, '_streaming_lock', False):
+            return
+        self._streaming_lock = True
         print(f"[EDGE STREAM] 🚀 Stream active for '{self.device_name}'. Capturing 1 HD frame every {self.interval}s...")
         try:
             while self.session_active and self.is_running:
@@ -277,7 +302,7 @@ class RaspberryPiEdgeClient:
                         "image": frame_data
                     })
                     await self.ws.send(payload)
-                    print(f"[{timestamp_24h}] 📸 Transmitted Signed HD Frame ({self.device_name}) -> Server (CPU: {telemetry['temp_c']}°C | Next in {self.interval}s)")
+                    print(f"[{timestamp_24h}] 📸 Transmitted Fresh HD Frame ({self.device_name}) -> Server (CPU: {telemetry['temp_c']}°C | Next in {self.interval}s)")
 
                 # Strict delay between captures
                 await asyncio.sleep(self.interval)
@@ -286,6 +311,8 @@ class RaspberryPiEdgeClient:
             print("[EDGE STREAM] Stream loop halted.")
         except Exception as e:
             print(f"[EDGE STREAM] Streaming error: {e}")
+        finally:
+            self._streaming_lock = False
 
     async def handle_messages(self):
         """Listens for server commands over secure WebSocket."""

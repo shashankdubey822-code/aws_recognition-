@@ -16,6 +16,7 @@ class TrackingController:
     def __init__(self, websocket: WebSocket, broadcast_func=None):
         self.websocket = websocket
         self.broadcast_func = broadcast_func or websocket.send_json
+        self.last_frame_times = {}
 
     async def broadcast_event(self, event_dict: dict):
         """Dispatches telemetry event to ALL connected dashboard browsers."""
@@ -28,10 +29,20 @@ class TrackingController:
                 pass
 
     async def process_frame(self, payload: dict):
+        dev_id = payload.get("device_id", "edge_device")
+        is_demo = payload.get("is_demo", False)
+
+        # Server-side deduplication guard: drop duplicate burst frames arriving < 2.5s apart from the same device
+        if not is_demo:
+            now_epoch = time.time()
+            last_epoch = self.last_frame_times.get(dev_id, 0.0)
+            if (now_epoch - last_epoch) < 2.5:
+                return
+            self.last_frame_times[dev_id] = now_epoch
+
         encoded_data = payload["image"].split(',')[1]
         image_bytes = base64.b64decode(encoded_data)
         
-        dev_id = payload.get("device_id", "edge_device")
         dev_name = payload.get("device_name", "Edge Node")
         client_ip = payload.get("ip", "127.0.0.1")
         current_time_str = payload.get("timestamp") or get_time_str()
