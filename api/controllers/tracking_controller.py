@@ -94,7 +94,7 @@ class TrackingController:
             "message": "Local AI Model Extracting Faces..."
         })
 
-        # 3. Detect and crop faces locally using Mediapipe crowd detector
+        # 3. Detect and crop faces locally using InsightFace SCRFD crowd detector
         all_faces = await asyncio.to_thread(detect_faces_crowd, image_bytes)
         
         valid_faces = []
