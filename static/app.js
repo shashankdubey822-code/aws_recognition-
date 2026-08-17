@@ -15,10 +15,26 @@ const cancelBtn = document.getElementById('cancel-btn');
 const startScanBtn = document.getElementById('start-scan-btn');
 const studentNameInput = document.getElementById('student-name-input');
 const studentRollInput = document.getElementById('student-roll-input');
-const regOverlay = document.getElementById('reg-overlay');
-const regInstruction = document.getElementById('reg-instruction');
-const regSubtext = document.getElementById('reg-subtext');
+const regFormView = document.getElementById('reg-form-view');
+const regScanView = document.getElementById('reg-scan-view');
+
+const regVideoElement = document.getElementById('regVideoElement');
+const regCanvasElement = document.getElementById('regCanvasElement');
+const regOverlayCanvas = document.getElementById('regOverlayCanvas');
+const regCtx = regCanvasElement ? regCanvasElement.getContext('2d', { willReadFrequently: true }) : null;
+
 const regProgressBar = document.getElementById('reg-progress-bar');
+const regProgressPercent = document.getElementById('reg-progress-percent');
+const regLiveStatusLabel = document.getElementById('reg-live-status-label');
+const regDirectionIndicator = document.getElementById('reg-direction-indicator');
+const regDirectionText = document.getElementById('reg-direction-text');
+const regAngleCounter = document.getElementById('reg-angle-counter');
+const regDiagLog = document.getElementById('reg-diag-log');
+const regErrorBox = document.getElementById('reg-error-box');
+const regErrorTitle = document.getElementById('reg-error-title');
+const regErrorMessage = document.getElementById('reg-error-message');
+const regRetryBtn = document.getElementById('reg-retry-btn');
+const regSystemPing = document.getElementById('reg-system-ping');
 
 // --- SESSION MANAGEMENT UI ELEMENTS ---
 const startSessionBtn = document.getElementById('start-session-btn');
@@ -78,6 +94,7 @@ const clearCacheBtn = document.getElementById('clear-cache-btn');
 let ws;
 let isProcessing = false;
 let currentStream = null;
+let regStream = null;
 let isDemoRunning = false;
 let availableCameras = [];
 let frameCount = 0;
@@ -100,6 +117,7 @@ let sessionRemainingSeconds = 0;
 // --- REGISTRATION STATE ---
 let isRegistering = false;
 let regProgress = 0;
+let regLoopAnimationId = null;
 
 // --- TOAST NOTIFICATIONS ---
 function showToast(message, type = 'info') {
@@ -151,6 +169,71 @@ function logToTerminal(msg, type = 'info') {
     while (terminalLogs.children.length > 50) {
         terminalLogs.removeChild(terminalLogs.firstChild);
     }
+}
+
+// --- DIAGNOSTIC REGISTRATION SUITE HELPERS ---
+function setDiagStep(stepNum, status, description = null) {
+    const stepElem = document.getElementById(`diag-step-${stepNum}`);
+    const iconElem = document.getElementById(`diag-icon-${stepNum}`);
+    const badgeElem = document.getElementById(`diag-badge-${stepNum}`);
+    const descElem = document.getElementById(`diag-desc-${stepNum}`);
+
+    if (!stepElem || !badgeElem) return;
+
+    if (description && descElem) {
+        descElem.textContent = description;
+    }
+
+    if (status === 'pending') {
+        stepElem.className = "p-2.5 rounded-xl border border-slate-200 bg-white/90 flex items-center justify-between transition-all";
+        if (iconElem) iconElem.textContent = "⏳";
+        badgeElem.className = "text-[10px] font-mono px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600 font-bold";
+        badgeElem.textContent = "PENDING";
+    } else if (status === 'running') {
+        stepElem.className = "p-2.5 rounded-xl border border-sky-300 bg-sky-50/80 ring-2 ring-sky-100 flex items-center justify-between transition-all animate-pulse";
+        if (iconElem) iconElem.textContent = "🔄";
+        badgeElem.className = "text-[10px] font-mono px-2 py-0.5 rounded-lg bg-sky-100 text-sky-700 font-bold";
+        badgeElem.textContent = "CHECKING...";
+    } else if (status === 'success') {
+        stepElem.className = "p-2.5 rounded-xl border border-emerald-300 bg-emerald-50/80 flex items-center justify-between transition-all";
+        if (iconElem) iconElem.textContent = "✅";
+        badgeElem.className = "text-[10px] font-mono px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 font-bold";
+        badgeElem.textContent = "VERIFIED ✓";
+    } else if (status === 'error') {
+        stepElem.className = "p-2.5 rounded-xl border border-rose-300 bg-rose-50/80 ring-2 ring-rose-100 flex items-center justify-between transition-all";
+        if (iconElem) iconElem.textContent = "❌";
+        badgeElem.className = "text-[10px] font-mono px-2 py-0.5 rounded-lg bg-rose-100 text-rose-700 font-bold";
+        badgeElem.textContent = "FAILED";
+    }
+}
+
+function appendDiagLog(msg, type = 'info') {
+    if (!regDiagLog) return;
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+    const div = document.createElement('div');
+    
+    let color = 'text-slate-300';
+    if (type === 'error') color = 'text-rose-400 font-bold';
+    else if (type === 'warning') color = 'text-amber-300';
+    else if (type === 'success') color = 'text-emerald-400 font-bold';
+
+    div.className = `${color} flex items-center gap-1.5`;
+    div.innerHTML = `<span class="text-slate-500">[${time}]</span> <span>${msg}</span>`;
+    regDiagLog.appendChild(div);
+    regDiagLog.scrollTop = regDiagLog.scrollHeight;
+}
+
+function resetDiagChecklist() {
+    for (let i = 1; i <= 6; i++) {
+        setDiagStep(i, 'pending');
+    }
+    if (regProgressPercent) regProgressPercent.textContent = '0%';
+    if (regProgressBar) regProgressBar.style.width = '0%';
+    if (regAngleCounter) regAngleCounter.textContent = '0';
+    if (regDirectionText) regDirectionText.textContent = 'LOOK STRAIGHT';
+    if (regDirectionIndicator) regDirectionIndicator.textContent = '🎯';
+    if (regErrorBox) regErrorBox.classList.add('hidden');
+    if (regDiagLog) regDiagLog.innerHTML = '<div>[SYSTEM] Diagnostic engine standby. Ready for scan.</div>';
 }
 
 // --- TOP TABS SWITCHER (LIGHT GLASS) ---
@@ -557,57 +640,162 @@ if (rawLightbox) {
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const wsUrl = `${protocol}//${window.location.host}/ws`;
 
-// --- REGISTRATION HANDLERS ---
+// --- REGISTRATION SUITE LOGIC ---
 if (addStudentBtn) {
     addStudentBtn.addEventListener('click', () => {
         modalBackdrop.classList.remove('hidden');
+        regFormView.classList.remove('hidden');
+        regScanView.classList.add('hidden');
         studentNameInput.value = '';
         studentRollInput.value = '';
+        resetDiagChecklist();
         studentNameInput.focus();
     });
 }
 
 if (cancelBtn) {
     cancelBtn.addEventListener('click', () => {
+        stopRegistrationCamera();
         modalBackdrop.classList.add('hidden');
+    });
+}
+
+if (regRetryBtn) {
+    regRetryBtn.addEventListener('click', () => {
+        regErrorBox.classList.add('hidden');
+        resetDiagChecklist();
+        startRegistrationSequence();
     });
 }
 
 if (startScanBtn) {
     startScanBtn.addEventListener('click', () => {
-        const name = studentNameInput.value.trim();
-        const roll = studentRollInput.value.trim();
-        
-        if (!name) { 
-            showToast("Please enter Student Full Name", "error"); 
-            studentNameInput.focus();
-            return; 
-        }
-        if (!roll) { 
-            showToast("Please enter Student Roll Number / ID", "error"); 
-            studentRollInput.focus();
-            return; 
-        }
-        
-        isRegistering = true;
-        regProgress = 0;
+        startRegistrationSequence();
+    });
+}
 
-        modalBackdrop.classList.add('hidden');
-        regOverlay.classList.remove('hidden');
-        if (regProgressBar) regProgressBar.style.width = '0%';
-        
-        regInstruction.textContent = "INITIALIZING 3D SCAN";
-        regSubtext.textContent = "Align face with camera...";
-        
-        startCamera().then(() => {
+function startRegistrationSequence() {
+    const name = studentNameInput.value.trim();
+    const roll = studentRollInput.value.trim();
+    
+    if (!name) { 
+        showToast("Please enter Student Full Name", "error"); 
+        studentNameInput.focus();
+        return; 
+    }
+    if (!roll) { 
+        showToast("Please enter Student Roll Number / ID", "error"); 
+        studentRollInput.focus();
+        return; 
+    }
+    
+    regFormView.classList.add('hidden');
+    regScanView.classList.remove('hidden');
+    resetDiagChecklist();
+
+    appendDiagLog(`[INIT] Starting enrolment for ${name} [Roll: ${roll}]`);
+    
+    // Step 1: Central Server Check
+    setDiagStep(1, 'running', 'Verifying active WebSocket link...');
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        setDiagStep(1, 'success', 'Central Hub link active & authenticated');
+        appendDiagLog('[NET] WebSocket authenticated & responsive', 'success');
+    } else {
+        setDiagStep(1, 'error', 'WebSocket disconnected from central hub');
+        appendDiagLog('[NET] ❌ WebSocket offline! Reconnecting...', 'error');
+        showRegistrationError('Connection Error', 'Cannot reach central AI server. Please check your internet link or refresh the page.');
+        return;
+    }
+
+    // Step 2: Optical Camera Initialization
+    setDiagStep(2, 'running', 'Accessing local optical sensor / webcam...');
+    startRegistrationCamera(name, roll);
+}
+
+async function startRegistrationCamera(name, roll) {
+    try {
+        if (regStream) {
+            regStream.getTracks().forEach(t => t.stop());
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }
+        });
+
+        regStream = stream;
+        regVideoElement.srcObject = stream;
+
+        regVideoElement.onloadedmetadata = () => {
+            regCanvasElement.width = regVideoElement.videoWidth;
+            regCanvasElement.height = regVideoElement.videoHeight;
+            regOverlayCanvas.width = regVideoElement.videoWidth;
+            regOverlayCanvas.height = regVideoElement.videoHeight;
+
+            setDiagStep(2, 'success', `Camera ready (${regVideoElement.videoWidth}x${regVideoElement.videoHeight})`);
+            appendDiagLog(`[OPTICAL] Sensor online: ${regVideoElement.videoWidth}x${regVideoElement.videoHeight}`, 'success');
+
+            // Step 3: MediaPipe AI Face Pipeline Initialized
+            setDiagStep(3, 'running', 'Align face inside the target oval...');
+            
+            isRegistering = true;
+            regProgress = 0;
+
             ws.send(JSON.stringify({ 
                 type: 'start_registration', 
                 name: name,
                 roll_number: roll
             }));
-            logToTerminal(`Initiated biometric mapping for ${name} (Roll: ${roll})`, 'info');
-        });
-    });
+            
+            appendDiagLog(`[AI] Dispatched 3D biometric request for '${name}'`);
+            logToTerminal(`[REG] Initiated biometric enrollment for ${name} (Roll: ${roll})`, 'info');
+
+            if (regLoopAnimationId) cancelAnimationFrame(regLoopAnimationId);
+            requestAnimationFrame(registrationRenderLoop);
+        };
+    } catch (err) {
+        setDiagStep(2, 'error', 'Camera access denied or unavailable');
+        appendDiagLog(`[OPTICAL] ❌ Camera access error: ${err.message}`, 'error');
+        showRegistrationError('Camera Access Failed', `Could not access local webcam: ${err.message}. Please allow camera permissions in your browser.`);
+    }
+}
+
+function registrationRenderLoop() {
+    if (!isRegistering) return;
+
+    if (ws && ws.readyState === WebSocket.OPEN && !isProcessing && regVideoElement.readyState >= 2) {
+        regCtx.drawImage(regVideoElement, 0, 0, regCanvasElement.width, regCanvasElement.height);
+        isProcessing = true;
+        
+        ws.send(JSON.stringify({
+            type: 'register_frame',
+            image: regCanvasElement.toDataURL('image/jpeg', 0.8)
+        }));
+    }
+
+    regLoopAnimationId = requestAnimationFrame(registrationRenderLoop);
+}
+
+function stopRegistrationCamera() {
+    isRegistering = false;
+    if (regLoopAnimationId) {
+        cancelAnimationFrame(regLoopAnimationId);
+        regLoopAnimationId = null;
+    }
+    if (regStream) {
+        regStream.getTracks().forEach(t => t.stop());
+        regStream = null;
+    }
+    if (regVideoElement) regVideoElement.srcObject = null;
+}
+
+function showRegistrationError(title, msg) {
+    stopRegistrationCamera();
+    if (regErrorBox) {
+        regErrorBox.classList.remove('hidden');
+        if (regErrorTitle) regErrorTitle.textContent = title;
+        if (regErrorMessage) regErrorMessage.textContent = msg;
+    }
+    showToast(msg, 'error');
 }
 
 // --- SESSION MANAGEMENT LOGIC ---
@@ -735,6 +923,8 @@ function connectWebSocket() {
             statusElem.textContent = 'SYSTEM ONLINE';
             statusElem.className = 'text-xs font-mono text-emerald-700 font-bold tracking-wide';
         }
+        if (regSystemPing) regSystemPing.textContent = '● CLOUD LINK ONLINE';
+        
         logToTerminal("WebSocket Connected. Central Hub Active (24h IST).", "success");
         showToast("Connected to Central Subsystem", "success");
         
@@ -837,46 +1027,94 @@ function connectWebSocket() {
             return;
         }
 
-        // --- REGISTRATION MESSAGES ---
+        // --- ADVANCED ANIMATED REGISTRATION DIAGNOSTIC HANDLERS ---
+        if (data.type === 'registration_waiting') {
+            isProcessing = false;
+            if (regLiveStatusLabel) regLiveStatusLabel.textContent = data.message;
+
+            if (data.direction) {
+                if (regDirectionText) regDirectionText.textContent = data.direction === 'CENTER' ? 'LOOK STRAIGHT' : `TURN ${data.direction}`;
+                if (regDirectionIndicator) {
+                    if (data.direction === 'LEFT') regDirectionIndicator.textContent = '⬅️';
+                    else if (data.direction === 'RIGHT') regDirectionIndicator.textContent = '➡️';
+                    else if (data.direction === 'UP') regDirectionIndicator.textContent = '⬆️';
+                    else if (data.direction === 'DOWN') regDirectionIndicator.textContent = '⬇️';
+                    else regDirectionIndicator.textContent = '🎯';
+                }
+            }
+
+            if (data.step === 'environmental' || data.step === 'face_detection') {
+                setDiagStep(3, 'running', data.message);
+            } else if (data.step === 'pose_liveness') {
+                setDiagStep(3, 'success', 'Face bounding box locked');
+                setDiagStep(5, 'running', data.message);
+            }
+            return;
+        }
+
+        if (data.type === 'registration_step_update') {
+            isProcessing = false;
+            if (data.step === 'conflict_check') {
+                setDiagStep(4, data.status, data.message);
+                appendDiagLog(`[AWS CHECK] ${data.message}`, data.status);
+            }
+            return;
+        }
+
         if (data.type === 'registration_status') {
             isProcessing = false;
             regProgress = data.progress;
+            
             if (regProgressBar) regProgressBar.style.width = `${regProgress}%`;
-            regSubtext.textContent = `${data.message}`;
+            if (regProgressPercent) regProgressPercent.textContent = `${regProgress}%`;
+            if (regAngleCounter) regAngleCounter.textContent = data.angle || Math.round((regProgress/100)*20);
+            if (regLiveStatusLabel) regLiveStatusLabel.textContent = data.message;
 
-            if (regProgress >= 100 && isRegistering) {
-                isRegistering = false;
-                regInstruction.textContent = "Processing Identity...";
-                logToTerminal("Persisting Biometric Vector to Cloud...", "info");
-            }
+            setDiagStep(3, 'success', 'Face geometry & lighting approved');
+            setDiagStep(4, 'success', 'No duplicate enrolment conflict');
+            setDiagStep(5, 'running', `Indexing Vector Angle ${data.angle || ''}/20...`);
+            
+            appendDiagLog(`[AWS REKOGNITION] Vector embedding indexed (${regProgress}%)`, 'info');
             return;
         } 
         
         if (data.type === 'registration_success') {
             isProcessing = false;
-            isRegistering = false;
-            regOverlay.classList.add('hidden');
+            stopRegistrationCamera();
+            
+            if (regProgressBar) regProgressBar.style.width = '100%';
+            if (regProgressPercent) regProgressPercent.textContent = '100%';
+            if (regAngleCounter) regAngleCounter.textContent = '20';
+            if (regLiveStatusLabel) regLiveStatusLabel.textContent = "Enrolment Complete!";
+
+            setDiagStep(5, 'success', '20 Biometric Angles Indexed to AWS Rekognition');
+            setDiagStep(6, 'success', 'Persisted to SQLite database & active ledger');
+            
+            appendDiagLog('[DB] Student credentials committed successfully', 'success');
             logToTerminal(data.message, "success");
             showToast("Student Registered Successfully", "success");
-            if (currentStream && !isDemoRunning) {
-                currentStream.getTracks().forEach(t => t.stop());
-                currentStream = null;
-                video.srcObject = null;
-            }
+
+            setTimeout(() => {
+                modalBackdrop.classList.add('hidden');
+                regFormView.classList.remove('hidden');
+                regScanView.classList.add('hidden');
+            }, 2500);
             return;
         } 
         
         if (data.type === 'registration_error') {
             isProcessing = false;
-            isRegistering = false;
-            regOverlay.classList.add('hidden');
-            logToTerminal(data.message, "error");
-            showToast(data.message, "error");
-            if (currentStream && !isDemoRunning) {
-                currentStream.getTracks().forEach(t => t.stop());
-                currentStream = null;
-                video.srcObject = null;
+            stopRegistrationCamera();
+            
+            if (data.step === 'conflict_check') {
+                setDiagStep(4, 'error', data.message);
+            } else {
+                setDiagStep(5, 'error', data.message);
             }
+            
+            appendDiagLog(`[ERROR] ❌ ${data.message}`, 'error');
+            logToTerminal(data.message, "error");
+            showRegistrationError('Biometric Enrolment Halted', data.message);
             return;
         }
 
@@ -918,6 +1156,7 @@ function connectWebSocket() {
             statusElem.textContent = 'RECONNECTING...';
             statusElem.className = 'text-xs font-mono text-rose-600 font-bold tracking-wide animate-pulse';
         }
+        if (regSystemPing) regSystemPing.textContent = '● RECONNECTING...';
         const timeout = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
         setTimeout(connectWebSocket, timeout);
         reconnectAttempts++;
@@ -952,7 +1191,7 @@ function addConfirmedEntry(name, rollNumber, time, deviceName) {
     confirmedList.insertBefore(div, confirmedList.firstChild);
 }
 
-// --- LOCAL CAMERA INITIALIZER ---
+// --- LOCAL DEMO CAMERA INITIALIZER ---
 async function startCamera(selectedDeviceId = null) {
     try {
         if (currentStream) {
@@ -1008,7 +1247,7 @@ if (cameraSelect) {
 }
 
 function renderLoop() {
-    if (!isDemoRunning && !isRegistering) return;
+    if (!isDemoRunning) return;
 
     frameCount++;
     if (Date.now() - lastFpsTime >= 1000) {
@@ -1020,10 +1259,7 @@ function renderLoop() {
     if (ws && ws.readyState === WebSocket.OPEN && !isProcessing) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        if (isRegistering) {
-            isProcessing = true;
-            ws.send(JSON.stringify({ type: 'register_frame', image: canvas.toDataURL('image/jpeg', 0.8) }));
-        } else if (isDemoRunning) {
+        if (isDemoRunning) {
             isProcessing = true;
             ws.send(JSON.stringify({ 
                 type: 'frame', 

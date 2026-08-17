@@ -506,51 +506,200 @@
     </div>
 
 
-    <!-- ================= MODAL: STUDENT REGISTRATION ================= -->
-    <div id="modal-backdrop" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
-        <div class="glass-panel w-full max-w-md rounded-3xl p-6 sm:p-8 relative overflow-hidden flex flex-col gap-5 shadow-2xl">
-            <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
+    <!-- ================= MODAL: ADVANCED ANIMATED BIOMETRIC REGISTRATION SUITE ================= -->
+    <div id="modal-backdrop" class="hidden fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/60 backdrop-blur-md overflow-y-auto">
+        <div class="glass-panel w-full max-w-4xl rounded-3xl p-5 sm:p-7 relative overflow-hidden flex flex-col gap-5 shadow-2xl my-auto">
+            
+            <!-- Modal Header -->
+            <div class="flex justify-between items-center pb-3 border-b border-slate-200/80">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500 to-emerald-500 text-white flex items-center justify-center shadow-md">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-slate-900 font-mono text-base">3D Biometric Student Enrolment</h3>
+                        <p class="text-xs text-slate-500 font-mono">Live Diagnostic Pipeline & Cloud Vector Indexing</p>
+                    </div>
                 </div>
-                <div>
-                    <h3 class="font-bold text-slate-900 font-mono text-base">Register New Student</h3>
-                    <p class="text-xs text-slate-500 font-mono">Biometric Cloud Vector Mapping</p>
-                </div>
-            </div>
-
-            <div class="flex flex-col gap-4">
-                <div>
-                    <label class="block text-xs font-mono font-bold text-slate-600 uppercase mb-1">Student Full Name</label>
-                    <input type="text" id="student-name-input" placeholder="e.g. Shashank Dubey" class="glass-input w-full px-4 py-2.5 rounded-xl text-sm font-sans">
-                </div>
-                <div>
-                    <label class="block text-xs font-mono font-bold text-slate-600 uppercase mb-1">Roll Number / Student ID</label>
-                    <input type="text" id="student-roll-input" placeholder="e.g. 24 or 2024/CS/101" class="glass-input w-full px-4 py-2.5 rounded-xl text-sm font-sans">
-                </div>
-            </div>
-
-            <div class="flex justify-end gap-3 pt-2">
-                <button id="cancel-btn" class="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 text-xs font-mono font-bold transition-all">
-                    CANCEL
-                </button>
-                <button id="start-scan-btn" class="px-5 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-emerald-600 text-white text-xs font-mono font-bold tracking-wider transition-all shadow-md">
-                    START 3D SCAN
+                <button id="cancel-btn" class="px-3.5 py-1.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 text-xs font-mono font-bold transition-all">
+                    ✕ CLOSE
                 </button>
             </div>
-        </div>
-    </div>
 
+            <!-- View 1: Credentials Input Form -->
+            <div id="reg-form-view" class="flex flex-col gap-5">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-mono font-bold text-slate-700 uppercase mb-1">Student Full Name *</label>
+                        <input type="text" id="student-name-input" placeholder="e.g. Shashank Dubey" class="glass-input w-full px-4 py-2.5 rounded-xl text-sm font-sans font-semibold">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-mono font-bold text-slate-700 uppercase mb-1">Roll Number / Student ID *</label>
+                        <input type="text" id="student-roll-input" placeholder="e.g. 24 or 2024/CS/101" class="glass-input w-full px-4 py-2.5 rounded-xl text-sm font-sans font-semibold">
+                    </div>
+                </div>
 
-    <!-- ================= SCAN PROGRESS OVERLAY ================= -->
-    <div id="reg-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
-        <div class="glass-panel w-full max-w-sm rounded-3xl p-6 text-center flex flex-col items-center gap-4 shadow-2xl">
-            <div class="w-16 h-16 rounded-full border-4 border-emerald-500 border-t-transparent animate-spin"></div>
-            <h4 id="reg-instruction" class="font-bold text-slate-900 font-mono text-base">SCANNING FACE...</h4>
-            <p id="reg-subtext" class="text-xs text-slate-500 font-sans">Align face with camera sensor...</p>
-            <div class="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
-                <div id="reg-progress-bar" class="bg-gradient-to-r from-sky-500 to-emerald-500 h-full w-0 transition-all duration-200"></div>
+                <div class="p-4 rounded-2xl bg-sky-50/60 border border-sky-200/80 flex items-start gap-3">
+                    <span class="text-lg">ℹ️</span>
+                    <div class="text-xs text-slate-600 font-sans leading-relaxed">
+                        <strong class="text-slate-900 font-mono">Automated 6-Stage Diagnostics Active:</strong>
+                        Clicking <strong class="text-sky-700">"INITIALIZE & START 3D SCAN"</strong> will verify system latency, initialize your local camera, run AI duplicate face checks on AWS, and validate 20 distinct biometric angles with active head pose liveness.
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-3 pt-2">
+                    <button id="start-scan-btn" class="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-gradient-to-r from-sky-600 to-emerald-600 text-white text-xs font-mono font-bold tracking-wider transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2">
+                        <span>INITIALIZE & START 3D SCAN</span>
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                    </button>
+                </div>
             </div>
+
+            <!-- View 2: Live Animated Diagnostic Pipeline & HUD (Hidden initially) -->
+            <div id="reg-scan-view" class="hidden grid grid-cols-1 lg:grid-cols-12 gap-5">
+                
+                <!-- Left: Live Optical Camera HUD (Span 6) -->
+                <div class="lg:col-span-6 flex flex-col gap-3">
+                    <div class="relative aspect-video rounded-2xl overflow-hidden bg-slate-900 flex items-center justify-center shadow-lg border border-slate-200">
+                        <video id="regVideoElement" autoplay playsinline muted class="w-full h-full object-cover"></video>
+                        <canvas id="regOverlayCanvas" class="absolute inset-0 w-full h-full pointer-events-none"></canvas>
+                        <canvas id="regCanvasElement" class="hidden"></canvas>
+                        
+                        <!-- Biometric Target Reticle Overlay -->
+                        <div class="absolute inset-0 border-2 border-dashed border-sky-400/40 m-6 rounded-2xl pointer-events-none flex items-center justify-center">
+                            <div class="w-32 h-44 rounded-full border-2 border-emerald-400/80 shadow-[0_0_15px_rgba(52,211,153,0.3)] animate-pulse flex items-center justify-center">
+                                <span class="text-[9px] font-mono text-emerald-300 font-bold bg-slate-950/70 px-2 py-0.5 rounded-full">3D SCAN ZONE</span>
+                            </div>
+                        </div>
+
+                        <!-- Dynamic Direction Badge -->
+                        <div class="absolute top-3 left-3 bg-slate-950/80 backdrop-blur-sm text-white px-3 py-1 rounded-xl text-xs font-mono font-bold flex items-center gap-2 border border-slate-700">
+                            <span id="reg-direction-indicator" class="text-emerald-400">🎯</span>
+                            <span id="reg-direction-text">LOOK STRAIGHT</span>
+                        </div>
+
+                        <!-- Progress Badge -->
+                        <div class="absolute bottom-3 right-3 bg-slate-950/80 backdrop-blur-sm text-white px-3 py-1 rounded-xl text-xs font-mono font-bold border border-slate-700">
+                            <span id="reg-angle-counter" class="text-sky-400">0</span>/20 Angles
+                        </div>
+                    </div>
+
+                    <!-- Progress Bar -->
+                    <div class="flex flex-col gap-1.5">
+                        <div class="flex justify-between text-xs font-mono">
+                            <span id="reg-live-status-label" class="text-slate-700 font-bold">Initializing Biometric Subsystem...</span>
+                            <span id="reg-progress-percent" class="text-emerald-700 font-bold">0%</span>
+                        </div>
+                        <div class="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
+                            <div id="reg-progress-bar" class="bg-gradient-to-r from-sky-500 to-emerald-500 h-full w-0 transition-all duration-200"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Animated Step-by-Step Diagnostic Checklist (Span 6) -->
+                <div class="lg:col-span-6 flex flex-col gap-3">
+                    <h4 class="text-xs font-mono font-bold text-slate-800 uppercase tracking-wider flex items-center justify-between">
+                        <span>Live Pipeline Diagnostics</span>
+                        <span id="reg-system-ping" class="text-[10px] text-emerald-600 font-mono font-bold">● CLOUD LINK ONLINE</span>
+                    </h4>
+
+                    <!-- Checklist Items Container -->
+                    <div class="flex flex-col gap-2 overflow-y-auto max-h-[320px] pr-1">
+                        
+                        <!-- Step 1: Network & WebSocket Handshake -->
+                        <div id="diag-step-1" class="p-2.5 rounded-xl border border-slate-200 bg-white/90 flex items-center justify-between transition-all">
+                            <div class="flex items-center gap-2.5">
+                                <span id="diag-icon-1" class="text-sm font-mono">⏳</span>
+                                <div>
+                                    <div class="text-xs font-bold text-slate-900 font-mono">1. Central Server WebSocket</div>
+                                    <div id="diag-desc-1" class="text-[10px] text-slate-500 font-mono">Connecting to central hub...</div>
+                                </div>
+                            </div>
+                            <span id="diag-badge-1" class="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600 font-bold">PENDING</span>
+                        </div>
+
+                        <!-- Step 2: Optical Camera & AI Face Stream -->
+                        <div id="diag-step-2" class="p-2.5 rounded-xl border border-slate-200 bg-white/90 flex items-center justify-between transition-all">
+                            <div class="flex items-center gap-2.5">
+                                <span id="diag-icon-2" class="text-sm font-mono">⏳</span>
+                                <div>
+                                    <div class="text-xs font-bold text-slate-900 font-mono">2. Optical Sensor & Camera Feed</div>
+                                    <div id="diag-desc-2" class="text-[10px] text-slate-500 font-mono">Requesting hardware access...</div>
+                                </div>
+                            </div>
+                            <span id="diag-badge-2" class="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600 font-bold">PENDING</span>
+                        </div>
+
+                        <!-- Step 3: Local AI Crowd & Mesh Detector -->
+                        <div id="diag-step-3" class="p-2.5 rounded-xl border border-slate-200 bg-white/90 flex items-center justify-between transition-all">
+                            <div class="flex items-center gap-2.5">
+                                <span id="diag-icon-3" class="text-sm font-mono">⏳</span>
+                                <div>
+                                    <div class="text-xs font-bold text-slate-900 font-mono">3. MediaPipe Face Geometry</div>
+                                    <div id="diag-desc-3" class="text-[10px] text-slate-500 font-mono">Analyzing lighting & face bounding box...</div>
+                                </div>
+                            </div>
+                            <span id="diag-badge-3" class="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600 font-bold">PENDING</span>
+                        </div>
+
+                        <!-- Step 4: AWS Pre-Enrolment Conflict Check -->
+                        <div id="diag-step-4" class="p-2.5 rounded-xl border border-slate-200 bg-white/90 flex items-center justify-between transition-all">
+                            <div class="flex items-center gap-2.5">
+                                <span id="diag-icon-4" class="text-sm font-mono">⏳</span>
+                                <div>
+                                    <div class="text-xs font-bold text-slate-900 font-mono">4. AWS Duplicate Enrolment Check</div>
+                                    <div id="diag-desc-4" class="text-[10px] text-slate-500 font-mono">Scanning AWS collection for existing identity...</div>
+                                </div>
+                            </div>
+                            <span id="diag-badge-4" class="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600 font-bold">PENDING</span>
+                        </div>
+
+                        <!-- Step 5: 3D Multi-Angle Vector Mapping -->
+                        <div id="diag-step-5" class="p-2.5 rounded-xl border border-slate-200 bg-white/90 flex items-center justify-between transition-all">
+                            <div class="flex items-center gap-2.5">
+                                <span id="diag-icon-5" class="text-sm font-mono">⏳</span>
+                                <div>
+                                    <div class="text-xs font-bold text-slate-900 font-mono">5. 20-Angle Liveness Vectors</div>
+                                    <div id="diag-desc-5" class="text-[10px] text-slate-500 font-mono">Indexing multi-perspective embeddings...</div>
+                                </div>
+                            </div>
+                            <span id="diag-badge-5" class="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600 font-bold">PENDING</span>
+                        </div>
+
+                        <!-- Step 6: SQLite & Cloud Database Commit -->
+                        <div id="diag-step-6" class="p-2.5 rounded-xl border border-slate-200 bg-white/90 flex items-center justify-between transition-all">
+                            <div class="flex items-center gap-2.5">
+                                <span id="diag-icon-6" class="text-sm font-mono">⏳</span>
+                                <div>
+                                    <div class="text-xs font-bold text-slate-900 font-mono">6. Database Record Persistence</div>
+                                    <div id="diag-desc-6" class="text-[10px] text-slate-500 font-mono">Committing student credential ledger...</div>
+                                </div>
+                            </div>
+                            <span id="diag-badge-6" class="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600 font-bold">PENDING</span>
+                        </div>
+
+                    </div>
+
+                    <!-- Live Diagnostic Event Stream -->
+                    <div class="bg-slate-900 rounded-xl p-2 text-[10px] font-mono text-slate-300 h-16 overflow-y-auto flex flex-col gap-1 border border-slate-800" id="reg-diag-log">
+                        <div>[SYSTEM] Diagnostic engine standby. Ready for scan.</div>
+                    </div>
+
+                    <div id="reg-error-box" class="hidden p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-mono text-rose-700 flex flex-col gap-2">
+                        <div class="font-bold flex items-center gap-1.5">
+                            <span>❌</span>
+                            <span id="reg-error-title">Registration Diagnostic Failed</span>
+                        </div>
+                        <p id="reg-error-message" class="text-[11px] font-sans text-rose-600">Error description...</p>
+                        <button id="reg-retry-btn" class="self-end px-3 py-1 rounded-lg bg-rose-600 text-white text-xs font-bold font-mono hover:bg-rose-700 transition-all">
+                            🔄 RETRY SCAN
+                        </button>
+                    </div>
+
+                </div>
+
+            </div>
+
         </div>
     </div>
 

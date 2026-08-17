@@ -30,7 +30,8 @@ class RegistrationController:
             "roll_number": roll_number,
             "identity_key": identity_key,
             "frames": 0,
-            "sequence": seq
+            "sequence": seq,
+            "conflict_checked": False
         }
 
     async def process_frame(self, payload: dict):
@@ -46,7 +47,8 @@ class RegistrationController:
         if not faces:
             await self.websocket.send_json({
                 "type": "registration_waiting", 
-                "message": "🔍 No face detected", 
+                "step": "face_detection",
+                "message": "🔍 No face detected in frame. Align face in target box.", 
                 "progress": int((self.session["frames"]/20)*100)
             })
             return
@@ -59,19 +61,21 @@ class RegistrationController:
         if brightness < 40:
             await self.websocket.send_json({
                 "type": "registration_waiting", 
-                "message": "Lighting too dark. Move to a brighter area.", 
+                "step": "environmental",
+                "message": "⚠️ Lighting too dark. Move to a brighter area.", 
                 "progress": int((self.session["frames"]/20)*100)
             })
             return
         if blur < 50:
             await self.websocket.send_json({
                 "type": "registration_waiting", 
-                "message": "Camera out of focus. Please hold still.", 
+                "step": "environmental",
+                "message": "⚠️ Camera out of focus / motion blur. Please hold still.", 
                 "progress": int((self.session["frames"]/20)*100)
             })
             return
 
-        # Active Liveness
+        # Active Liveness Pose Check
         nose_x, nose_y = None, None
         if "landmarks" in face and len(face["landmarks"]) > 2:
             nose_x = face["landmarks"][2]["x"]
@@ -87,7 +91,9 @@ class RegistrationController:
                 if not (0.35 < nose_rel_x < 0.65 and 0.35 < nose_rel_y < 0.65):
                     await self.websocket.send_json({
                         "type": "registration_waiting", 
-                        "message": "Maintain Center Lock. Look straight ahead.", 
+                        "step": "pose_liveness",
+                        "direction": "CENTER",
+                        "message": "🎯 Maintain Center Lock. Look straight ahead.", 
                         "progress": int((frames/20)*100)
                     })
                     return
@@ -101,33 +107,79 @@ class RegistrationController:
                 
                 if current_challenge == "LEFT":
                     if nose_rel_x < 0.55: 
-                        await self.websocket.send_json({"type": "registration_waiting", "message": "Turn head LEFT to continue.", "progress": int((frames/20)*100)})
+                        await self.websocket.send_json({
+                            "type": "registration_waiting", 
+                            "step": "pose_liveness",
+                            "direction": "LEFT",
+                            "message": "⬅️ Turn head slightly LEFT to capture side profile...", 
+                            "progress": int((frames/20)*100)
+                        })
                         return
                 elif current_challenge == "RIGHT":
                     if nose_rel_x > 0.45:
-                        await self.websocket.send_json({"type": "registration_waiting", "message": "Turn head RIGHT to continue.", "progress": int((frames/20)*100)})
+                        await self.websocket.send_json({
+                            "type": "registration_waiting", 
+                            "step": "pose_liveness",
+                            "direction": "RIGHT",
+                            "message": "➡️ Turn head slightly RIGHT to capture side profile...", 
+                            "progress": int((frames/20)*100)
+                        })
                         return
                 elif current_challenge == "UP":
                     if nose_rel_y > 0.45:
-                        await self.websocket.send_json({"type": "registration_waiting", "message": "Tilt head UP to continue.", "progress": int((frames/20)*100)})
+                        await self.websocket.send_json({
+                            "type": "registration_waiting", 
+                            "step": "pose_liveness",
+                            "direction": "UP",
+                            "message": "⬆️ Tilt head slightly UP to capture chin & jaw profile...", 
+                            "progress": int((frames/20)*100)
+                        })
                         return
                 elif current_challenge == "DOWN":
                     if nose_rel_y < 0.55:
-                        await self.websocket.send_json({"type": "registration_waiting", "message": "Tilt head DOWN to continue.", "progress": int((frames/20)*100)})
+                        await self.websocket.send_json({
+                            "type": "registration_waiting", 
+                            "step": "pose_liveness",
+                            "direction": "DOWN",
+                            "message": "⬇️ Tilt head slightly DOWN to complete 3D angle map...", 
+                            "progress": int((frames/20)*100)
+                        })
                         return
 
-        # Identity Conflict Guard (First frame check)
-        if self.session["frames"] == 0:
-            search_results = await asyncio.to_thread(search_face_on_aws, face["bytes"])
-            if search_results and any(res["status"] == "match" for res in search_results):
-                matched_raw = next(res["name"] for res in search_results if res["status"] == "match")
+        # Identity Conflict Guard (First frame check across AWS collection)
+        if not self.session.get("conflict_checked", False):
+            await self.websocket.send_json({
+                "type": "registration_step_update",
+                "step": "conflict_check",
+                "status": "running",
+                "message": "🔍 Scanning AWS Cloud Collection for duplicate enrolment..."
+            })
+            
+            search_res = await asyncio.to_thread(search_face_on_aws, face["bytes"])
+            
+            if isinstance(search_res, list):
+                search_res = search_res[0] if len(search_res) > 0 else {}
+
+            if isinstance(search_res, dict) and search_res.get("match"):
+                matched_raw = search_res.get("identity", "Unknown")
                 matched_name, matched_roll = parse_identity(matched_raw)
+                
+                err_text = f"Identity Conflict: Face already registered as '{matched_name}' (Roll No: {matched_roll})."
                 await self.websocket.send_json({
                     "type": "registration_error", 
-                    "message": f"Identity Conflict: Already registered as '{matched_name}' (Roll No: {matched_roll})."
+                    "step": "conflict_check",
+                    "message": err_text
                 })
                 self.session = None
                 return
+            
+            self.session["conflict_checked"] = True
+            await self.websocket.send_json({
+                "type": "registration_step_update",
+                "step": "conflict_check",
+                "status": "success",
+                "message": "✅ Identity clear. No existing record found in cloud."
+            })
 
         # Register Vector Embedding to AWS Rekognition
         success, msg = await asyncio.to_thread(register_face_to_aws, face["bytes"], self.session["identity_key"])
@@ -136,9 +188,12 @@ class RegistrationController:
             progress = int((self.session["frames"]/20)*100)
             await self.websocket.send_json({
                 "type": "registration_status", 
-                "message": f"Biometric Angle {self.session['frames']}/20 Secured ✓", 
+                "step": "indexing",
+                "message": f"Biometric Angle {self.session['frames']}/20 Vector Secured ✓", 
+                "angle": self.session["frames"],
                 "progress": progress
             })
+            
             if self.session["frames"] >= 20:
                 # Save to local SQLite database
                 try:
@@ -152,6 +207,14 @@ class RegistrationController:
 
                 await self.websocket.send_json({
                     "type": "registration_success", 
-                    "message": f"✅ Student '{self.session['name']}' (Roll: {self.session['roll_number']}) Registered Successfully."
+                    "step": "complete",
+                    "message": f"✅ Student '{self.session['name']}' [Roll: {self.session['roll_number']}] Registered Successfully in Cloud & Database."
                 })
                 self.session = None
+        else:
+            await self.websocket.send_json({
+                "type": "registration_waiting",
+                "step": "indexing",
+                "message": f"AWS indexing: {msg}",
+                "progress": int((self.session["frames"]/20)*100)
+            })
