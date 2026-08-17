@@ -643,26 +643,28 @@ const wsUrl = `${protocol}//${window.location.host}/ws`;
 // --- REGISTRATION SUITE LOGIC ---
 if (addStudentBtn) {
     addStudentBtn.addEventListener('click', () => {
-        modalBackdrop.classList.remove('hidden');
-        regFormView.classList.remove('hidden');
-        regScanView.classList.add('hidden');
-        studentNameInput.value = '';
-        studentRollInput.value = '';
+        if (modalBackdrop) modalBackdrop.classList.remove('hidden');
+        if (regFormView) regFormView.classList.remove('hidden');
+        if (regScanView) regScanView.classList.add('hidden');
+        if (studentNameInput) {
+            studentNameInput.value = '';
+            studentNameInput.focus();
+        }
+        if (studentRollInput) studentRollInput.value = '';
         resetDiagChecklist();
-        studentNameInput.focus();
     });
 }
 
 if (cancelBtn) {
     cancelBtn.addEventListener('click', () => {
         stopRegistrationCamera();
-        modalBackdrop.classList.add('hidden');
+        if (modalBackdrop) modalBackdrop.classList.add('hidden');
     });
 }
 
 if (regRetryBtn) {
     regRetryBtn.addEventListener('click', () => {
-        regErrorBox.classList.add('hidden');
+        if (regErrorBox) regErrorBox.classList.add('hidden');
         resetDiagChecklist();
         startRegistrationSequence();
     });
@@ -675,22 +677,22 @@ if (startScanBtn) {
 }
 
 function startRegistrationSequence() {
-    const name = studentNameInput.value.trim();
-    const roll = studentRollInput.value.trim();
+    const name = studentNameInput ? studentNameInput.value.trim() : "";
+    const roll = studentRollInput ? studentRollInput.value.trim() : "";
     
     if (!name) { 
         showToast("Please enter Student Full Name", "error"); 
-        studentNameInput.focus();
+        if (studentNameInput) studentNameInput.focus();
         return; 
     }
     if (!roll) { 
         showToast("Please enter Student Roll Number / ID", "error"); 
-        studentRollInput.focus();
+        if (studentRollInput) studentRollInput.focus();
         return; 
     }
     
-    regFormView.classList.add('hidden');
-    regScanView.classList.remove('hidden');
+    if (regFormView) regFormView.classList.add('hidden');
+    if (regScanView) regScanView.classList.remove('hidden');
     resetDiagChecklist();
 
     appendDiagLog(`[INIT] Starting enrolment for ${name} [Roll: ${roll}]`);
