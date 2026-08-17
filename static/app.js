@@ -1009,6 +1009,21 @@ function connectWebSocket() {
             return;
         }
 
+        if (data.type === 'frames_purged') {
+            logToTerminal(`[STORAGE] 🧹 ${data.message}`, 'info');
+            if (data.devices_cleared) {
+                data.devices_cleared.forEach(devId => {
+                    if (allDevicesMap[devId]) {
+                        allDevicesMap[devId].raw_frames = [];
+                        allDevicesMap[devId].cropped_queue = [];
+                        allDevicesMap[devId].total_frames = 0;
+                    }
+                });
+                renderDevicesView();
+            }
+            return;
+        }
+
         if (data.type === 'session_stopped') {
             resetSessionUI();
             showToast(`Session ended! Report emailed to shashankdubey822@gmail.com (${data.total_attendees} students)`, "success");

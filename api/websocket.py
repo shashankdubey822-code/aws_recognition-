@@ -168,6 +168,8 @@ async def end_active_session(reason: str = "Teacher Manual Stop"):
                 if p and p not in raw_frames and os.path.exists(p):
                     raw_frames.append(p)
 
+    target_device = active_session.get("target_device", "")
+
     # 6. Asynchronously dispatch final compiled email report with Excel & full uncropped frames via HTTPS REST API
     session_data = {
         "id": session_id,
@@ -179,6 +181,41 @@ async def end_active_session(reason: str = "Teacher Manual Stop"):
     async def _async_email_task():
         success, msg = await asyncio.to_thread(send_session_email_report, session_data)
         print(f"[SESSION EMAIL] {msg}")
+        
+        if success:
+            # Automatic post-email storage cleanup: purge attached raw uncropped frames from disk
+            deleted_count = 0
+            for frame_path in raw_frames:
+                f_local = frame_path[1:] if frame_path.startswith("/") else frame_path
+                if os.path.exists(f_local):
+                    try:
+                        os.remove(f_local)
+                        deleted_count += 1
+                    except Exception as e:
+                        print(f"⚠️ Failed removing frame file {f_local}: {e}")
+
+            # Clear memory buffers and frame counters for the session device(s)
+            devices_to_clear = [target_device] if (target_device and target_device != "ALL" and target_device in connected_devices) else list(connected_devices.keys())
+            
+            for dev_id in devices_to_clear:
+                if dev_id in connected_devices:
+                    connected_devices[dev_id]["raw_frames"] = []
+                    connected_devices[dev_id]["cropped_queue"] = []
+                    connected_devices[dev_id]["total_frames"] = 0
+
+            active_session["session_raw_frames"] = []
+            
+            print(f"[STORAGE CLEANUP] 🧹 Successfully purged {deleted_count} raw frames from storage after email delivery confirmation.")
+            
+            await broadcast_json({
+                "type": "frames_purged",
+                "message": f"Email report delivered. Auto-purged {deleted_count} raw frames from server storage.",
+                "devices_cleared": devices_to_clear
+            })
+            await broadcast_json({
+                "type": "devices_update",
+                "devices": list(connected_devices.values())
+            })
 
     asyncio.create_task(_async_email_task())
 
@@ -230,8 +267,11 @@ async def websocket_endpoint(websocket: WebSocket):
                         is_target = (not target_device or target_device == "ALL" or target_device == dev_id)
                         if connected_devices[dev_id]["status"] != "disconnected":
                             connected_devices[dev_id]["status"] = "active" if is_target else "standby"
-                        connected_devices[dev_id]["verified_students"] = []
-                        connected_devices[dev_id]["cropped_queue"] = []
+                        if is_target:
+                            connected_devices[dev_id]["verified_students"] = []
+                            connected_devices[dev_id]["cropped_queue"] = []
+                            connected_devices[dev_id]["raw_frames"] = []
+                            connected_devices[dev_id]["total_frames"] = 0
                     
                     if session_timer_task and not session_timer_task.done():
                         session_timer_task.cancel()
