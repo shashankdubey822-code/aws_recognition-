@@ -60,9 +60,9 @@ async def lifespan(app: FastAPI):
     
     yield
     # --- SHUTDOWN PHASE ---
-    print("Nexus.AI Attendance Engine Gracefully Stopped.")
+    print("Anyiiiiie.AI Attendance Engine Gracefully Stopped.")
 
-app = FastAPI(title="Nexus.AI Attendance Engine", lifespan=lifespan)
+app = FastAPI(title="Anyiiiiie.AI Attendance Engine", lifespan=lifespan)
 
 # Mount Static Files
 app.mount("/static", StaticFiles(directory="static"), name="static")

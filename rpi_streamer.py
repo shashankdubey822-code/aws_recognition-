@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-   NEXUS AI — CYBER-SECURE ULTRA-HDR RASPBERRY PI CAMERA EDGE DAEMON (v3.0)
+   ANYIIIIIE AI — CYBER-SECURE ULTRA-HDR RASPBERRY PI CAMERA EDGE DAEMON (v3.0)
 ================================================================================
 Enterprise-grade, cybersecurity-hardened, low-light optimized edge camera client.
 Features:
@@ -373,7 +373,7 @@ class RaspberryPiEdgeClient:
     async def run(self):
         """Main lifecycle manager with exponential backoff & auto-reconnect watchdog."""
         print("=" * 72)
-        print("   NEXUS AI — CYBER-SECURE ULTRA-HDR RASPBERRY PI DAEMON (v3.0)")
+        print("   ANYIIIIIE AI — CYBER-SECURE ULTRA-HDR RASPBERRY PI DAEMON (v3.0)")
         print(f"   Device Name  : {self.device_name} (ID: {self.device_id})")
         print(f"   Local IPv4   : {self.local_ip}")
         print(f"   Resolution   : {self.width}x{self.height} (95% JPEG Quality)")
@@ -420,7 +420,7 @@ class RaspberryPiEdgeClient:
         self.release_camera()
 
 def main():
-    parser = argparse.ArgumentParser(description="Nexus AI Cyber-Secure Ultra-HDR Raspberry Pi Camera Daemon")
+    parser = argparse.ArgumentParser(description="Anyiiiiie AI Cyber-Secure Ultra-HDR Raspberry Pi Camera Daemon")
     parser.add_argument("--url", default=DEFAULT_SERVER_WS, help="Central Server WebSocket URL")
     parser.add_argument("--device", default="Classroom 101", help="Classroom Node Name")
     parser.add_argument("--id", default=None, help="Unique Device Identifier")

@@ -1,12 +1,12 @@
 #!/bin/bash
 # ====================================================================
-# Nexus.AI — Automated Raspberry Pi Setup Script
+# Anyiiiiie.AI — Automated Raspberry Pi Setup Script
 # Run on Raspberry Pi: bash setup-pi.sh
 # ====================================================================
 
 set -e
 
-echo "🚀 Setting up Nexus.AI Raspberry Pi Edge Client..."
+echo "🚀 Setting up Anyiiiiie.AI Raspberry Pi Edge Client..."
 echo "================================================="
 
 # 1. Update system packages

@@ -107,7 +107,7 @@ def send_via_resend_api(session_data: dict, target_email: str, report_path: str)
     <body style="font-family: Arial, sans-serif; background-color: #f8fafc; padding: 20px; color: #1e293b;">
         <div style="max-width: 650px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
             <div style="background: linear-gradient(135deg, #0284c7, #0f172a); padding: 24px; color: white;">
-                <h2 style="margin: 0; font-size: 22px; letter-spacing: 0.5px;">🎓 Nexus AI Security & Attendance Report</h2>
+                <h2 style="margin: 0; font-size: 22px; letter-spacing: 0.5px;">🎓 Anyiiiiie.AI Security & Attendance Report</h2>
                 <p style="margin: 6px 0 0 0; opacity: 0.85; font-size: 13px;">Classroom Monitoring Session Summary (24-Hour IST)</p>
             </div>
             
@@ -204,7 +204,7 @@ def send_via_resend_api(session_data: dict, target_email: str, report_path: str)
 
     # 3. Payload for Resend HTTPS API
     payload_data = {
-        "from": "Nexus AI Attendance <onboarding@resend.dev>",
+        "from": "Anyiiiiie.AI Attendance <onboarding@resend.dev>",
         "to": [target_email],
         "subject": f"📊 Attendance Session Report [{session_id}] - {len(attendees)} Present ({current_time_str} IST)",
         "html": html_content,
@@ -215,7 +215,7 @@ def send_via_resend_api(session_data: dict, target_email: str, report_path: str)
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
-        "User-Agent": "NexusAI-Attendance/1.0"
+        "User-Agent": "AnyiiiiieAI-Attendance/1.0"
     }
 
     try:
