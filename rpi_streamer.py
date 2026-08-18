@@ -141,8 +141,8 @@ def connect_websocket_universal(url: str, hf_token: str = None):
         return websockets.connect(
             target_url, 
             additional_headers=headers, 
-            ping_interval=15, 
-            ping_timeout=20, 
+            ping_interval=30, 
+            ping_timeout=120, 
             max_size=20 * 1024 * 1024
         )
     except TypeError:
@@ -153,8 +153,8 @@ def connect_websocket_universal(url: str, hf_token: str = None):
         return websockets.connect(
             target_url, 
             extra_headers=headers, 
-            ping_interval=15, 
-            ping_timeout=20, 
+            ping_interval=30, 
+            ping_timeout=120, 
             max_size=20 * 1024 * 1024
         )
     except TypeError:
@@ -163,8 +163,8 @@ def connect_websocket_universal(url: str, hf_token: str = None):
     # Try 3: Standard (URL token authentication)
     return websockets.connect(
         target_url, 
-        ping_interval=15, 
-        ping_timeout=20, 
+        ping_interval=30, 
+        ping_timeout=120, 
         max_size=20 * 1024 * 1024
     )
 
