@@ -31,12 +31,16 @@ class TrackingController:
     async def process_frame(self, payload: dict):
         dev_id = payload.get("device_id", "edge_device")
         is_demo = payload.get("is_demo", False)
+        is_turbo = payload.get("turbo_active", False)
 
-        # Server-side deduplication guard: drop duplicate burst frames arriving < 2.5s apart from the same device
+        # Server-side deduplication guard:
+        # - In Turbo Mode: Allow high-rate 20-30 FPS video streaming (min gap >= 0.033s)
+        # - In Standard Mode: Maintain 2.5s pacing
         if not is_demo:
             now_epoch = time.time()
             last_epoch = self.last_frame_times.get(dev_id, 0.0)
-            if (now_epoch - last_epoch) < 2.5:
+            min_gap = 0.033 if is_turbo else 2.5
+            if (now_epoch - last_epoch) < min_gap:
                 return
             self.last_frame_times[dev_id] = now_epoch
 
@@ -51,12 +55,12 @@ class TrackingController:
         # 1. PERSIST & BROADCAST RAW UNCROPPED FRAME
         # -------------------------------------------------------------
         os.makedirs("static/raw_frames", exist_ok=True)
-        raw_filename = f"raw_{dev_id}_{get_compact_timestamp_str()}_{int(time.time()*1000)%10000}.jpg"
+        raw_filename = f"raw_{dev_id}_{get_compact_timestamp_str()}_{int(time.time()*1000)%100000}.jpg"
         raw_filepath = os.path.join("static/raw_frames", raw_filename)
         
         try:
-            with open(raw_filepath, "wb") as f:
-                f.write(image_bytes)
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, lambda: open(raw_filepath, "wb").write(image_bytes))
         except Exception as e:
             print(f"⚠️ Error saving raw frame: {e}")
 
