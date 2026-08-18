@@ -39,6 +39,9 @@ const regSystemPing = document.getElementById('reg-system-ping');
 // --- SESSION MANAGEMENT UI ELEMENTS ---
 const startSessionBtn = document.getElementById('start-session-btn');
 const stopSessionBtn = document.getElementById('stop-session-btn');
+const turboToggleBtn = document.getElementById('turbo-toggle-btn');
+const turboLabel = document.getElementById('turbo-label');
+const turboIcon = document.getElementById('turbo-icon');
 const sessionDurationSelect = document.getElementById('session-duration-select');
 const sessionTargetDeviceSelect = document.getElementById('session-target-device-select');
 const sessionTimerBox = document.getElementById('session-timer-box');
@@ -46,6 +49,8 @@ const sessionTimerDisplay = document.getElementById('session-timer-display');
 const sessionStatusLabel = document.getElementById('session-status-label');
 const sessionIndicator = document.getElementById('session-indicator');
 const sessionPresentCount = document.getElementById('session-present-count');
+
+let isTurboModeActive = false;
 const statSessionStatus = document.getElementById('stat-session-status');
 const statTargetNode = document.getElementById('stat-target-node');
 const statActivePis = document.getElementById('stat-active-pis');
@@ -1060,6 +1065,34 @@ if (stopSessionBtn) {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'stop_session' }));
             logToTerminal(`[SESSION] Manual stop triggered. Dispatching report...`, 'warning');
+        }
+    });
+}
+
+// --- ⚡ TURBO MODE CONTROLLER (30 FPS FAST-ACTION CAPTURE) ---
+if (turboToggleBtn) {
+    turboToggleBtn.addEventListener('click', () => {
+        isTurboModeActive = !isTurboModeActive;
+        const targetDevice = sessionTargetDeviceSelect ? sessionTargetDeviceSelect.value : "ALL";
+
+        if (isTurboModeActive) {
+            turboToggleBtn.className = "px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white border border-amber-400 font-mono font-bold text-xs tracking-wider transition-all flex items-center gap-1.5 shadow-[0_4px_12px_rgba(245,158,11,0.4)] animate-pulse";
+            if (turboLabel) turboLabel.textContent = "TURBO 30FPS: ACTIVE";
+            showToast("⚡ Turbo Mode Activated: 30 FPS Optical Flow & Fast Action Burst Active", "success");
+            logToTerminal("[TURBO ENGINE] ⚡ Activated 30 FPS High-Speed Optical Flow Burst Mode (8-10 km/h Running Target Capture).", "success");
+        } else {
+            turboToggleBtn.className = "px-3.5 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 font-mono font-bold text-xs tracking-wider transition-all flex items-center gap-1.5 shadow-sm";
+            if (turboLabel) turboLabel.textContent = "TURBO 30FPS: OFF";
+            showToast("Turtle Standard Mode Restored (3s Paced Interval)", "info");
+            logToTerminal("[TURBO ENGINE] 🐢 Standard paced interval mode restored (low power).", "info");
+        }
+
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'toggle_turbo_mode',
+                device_id: targetDevice || "ALL",
+                turbo: isTurboModeActive
+            }));
         }
     });
 }

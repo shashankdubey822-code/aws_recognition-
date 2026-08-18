@@ -185,6 +185,7 @@ class RaspberryPiEdgeClient:
         
         self.is_running = True
         self.session_active = False
+        self.turbo_mode = False
         self.cap = None
         self.ws = None
         self.capture_task = None
@@ -272,40 +273,137 @@ class RaspberryPiEdgeClient:
         return f"data:image/jpeg;base64,{b64_str}"
 
     async def streaming_loop(self):
-        """Streams 1 cryptographically-signed HD frame strictly every interval seconds with task lock."""
+        """
+        Streams HD frames with dynamic operating modes:
+        - STANDARD: Strict interval pacing (low power, 3s-15s)
+        - ⚡ TURBO: Continuous 30 FPS Optical Flow & Anti-Blur burst for fast-moving targets (8-10 km/h)
+        """
         if getattr(self, '_streaming_lock', False):
             return
         self._streaming_lock = True
-        print(f"[EDGE STREAM] 🚀 Stream active for '{self.device_name}'. Capturing 1 HD frame every {self.interval}s...")
+        
+        mode_label = "⚡ TURBO (30 FPS Fast Action Capture)" if self.turbo_mode else f"STANDARD ({self.interval}s interval)"
+        print(f"[EDGE STREAM] 🚀 Stream active for '{self.device_name}'. Operating Mode: {mode_label}")
+        
+        prev_gray_motion = None
+        last_transmit_time = 0.0
+
         try:
             while self.session_active and self.is_running:
-                loop = asyncio.get_running_loop()
-                frame_data = await loop.run_in_executor(None, self.capture_frame_base64)
-                
-                if frame_data and self.ws:
-                    timestamp_24h = time.strftime("%H:%M:%S")
-                    nonce = secrets.token_hex(8)
-                    telemetry = get_system_telemetry()
+                if not self.turbo_mode:
+                    # =========================================================
+                    # STANDARD MODE: Paced interval capture
+                    # =========================================================
+                    loop = asyncio.get_running_loop()
+                    frame_data = await loop.run_in_executor(None, self.capture_frame_base64)
                     
-                    # Generate HMAC-SHA256 signature for payload integrity
-                    sig = generate_hmac_signature(self.secret_key, self.device_id, timestamp_24h, nonce)
-                    
-                    payload = json.dumps({
-                        "type": "frame",
-                        "device_id": self.device_id,
-                        "device_name": self.device_name,
-                        "ip": self.local_ip,
-                        "timestamp": timestamp_24h,
-                        "nonce": nonce,
-                        "signature": sig,
-                        "telemetry": telemetry,
-                        "image": frame_data
-                    })
-                    await self.ws.send(payload)
-                    print(f"[{timestamp_24h}] 📸 Transmitted Fresh HD Frame ({self.device_name}) -> Server (CPU: {telemetry['temp_c']}°C | Next in {self.interval}s)")
+                    if frame_data and self.ws:
+                        timestamp_24h = time.strftime("%H:%M:%S")
+                        nonce = secrets.token_hex(8)
+                        telemetry = get_system_telemetry()
+                        sig = generate_hmac_signature(self.secret_key, self.device_id, timestamp_24h, nonce)
+                        
+                        payload = json.dumps({
+                            "type": "frame",
+                            "device_id": self.device_id,
+                            "device_name": self.device_name,
+                            "ip": self.local_ip,
+                            "timestamp": timestamp_24h,
+                            "nonce": nonce,
+                            "signature": sig,
+                            "telemetry": telemetry,
+                            "turbo_active": False,
+                            "image": frame_data
+                        })
+                        await self.ws.send(payload)
+                        print(f"[{timestamp_24h}] 📸 Transmitted Fresh HD Frame ({self.device_name}) -> Server (CPU: {telemetry['temp_c']}°C | Next in {self.interval}s)")
 
-                # Strict delay between captures
-                await asyncio.sleep(self.interval)
+                    await asyncio.sleep(self.interval)
+
+                else:
+                    # =========================================================
+                    # ⚡ TURBO MODE: 30 FPS Optical Flow & Anti-Blur Burst
+                    # (Captures individuals running at 8-10 km/h with zero duplicates)
+                    # =========================================================
+                    if not self.cap or not self.cap.isOpened():
+                        if not self.open_camera():
+                            await asyncio.sleep(0.5)
+                            continue
+
+                    ret, frame = self.cap.read()
+                    if not ret or frame is None:
+                        await asyncio.sleep(0.02)
+                        continue
+
+                    # Downscale 160x90 for ultra-fast motion differencing (<1ms)
+                    small_gray = cv2.cvtColor(cv2.resize(frame, (160, 90)), cv2.COLOR_BGR2GRAY)
+                    small_gray = cv2.GaussianBlur(small_gray, (7, 7), 0)
+
+                    has_motion = False
+                    motion_score = 0.0
+                    if prev_gray_motion is not None:
+                        diff = cv2.absdiff(small_gray, prev_gray_motion)
+                        motion_score = float(np.mean(diff))
+                        # Motion threshold: person moving/running in front of camera
+                        if motion_score > 2.0:
+                            has_motion = True
+                    else:
+                        has_motion = True
+
+                    prev_gray_motion = small_gray
+                    now = time.time()
+
+                    # Trigger Anti-Blur Burst when dynamic movement occurs
+                    if has_motion and (now - last_transmit_time) >= 0.50:
+                        last_transmit_time = now
+                        
+                        # Grab rapid 4-frame burst to select the sharpest non-blurred optical capture
+                        burst_frames = [frame]
+                        for _ in range(3):
+                            r_b, f_b = self.cap.read()
+                            if r_b and f_b is not None:
+                                burst_frames.append(f_b)
+
+                        # Select sharpest frame using Laplacian variance
+                        best_frame = burst_frames[0]
+                        max_sharpness = -1.0
+                        for f_cand in burst_frames:
+                            g_cand = cv2.cvtColor(f_cand, cv2.COLOR_BGR2GRAY)
+                            s_val = float(cv2.Laplacian(g_cand, cv2.CV_64F).var())
+                            if s_val > max_sharpness:
+                                max_sharpness = s_val
+                                best_frame = f_cand
+
+                        # Multi-stage enhancement
+                        enhanced = enhance_frame_advanced(best_frame)
+                        _, buffer = cv2.imencode('.jpg', enhanced, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+                        b64_str = base64.b64encode(buffer).decode('utf-8')
+                        frame_data = f"data:image/jpeg;base64,{b64_str}"
+
+                        if self.ws:
+                            timestamp_24h = time.strftime("%H:%M:%S")
+                            nonce = secrets.token_hex(8)
+                            telemetry = get_system_telemetry()
+                            sig = generate_hmac_signature(self.secret_key, self.device_id, timestamp_24h, nonce)
+                            
+                            payload = json.dumps({
+                                "type": "frame",
+                                "device_id": self.device_id,
+                                "device_name": self.device_name,
+                                "ip": self.local_ip,
+                                "timestamp": timestamp_24h,
+                                "nonce": nonce,
+                                "signature": sig,
+                                "telemetry": telemetry,
+                                "turbo_active": True,
+                                "motion_score": round(motion_score, 1),
+                                "image": frame_data
+                            })
+                            await self.ws.send(payload)
+                            print(f"[{timestamp_24h}] ⚡ [TURBO BURST] Fast Motion Captured (Motion: {motion_score:.1f} | Sharpness: {max_sharpness:.1f} | CPU: {telemetry['temp_c']}°C)")
+
+                    # 33ms check for 30 FPS hardware loop rate
+                    await asyncio.sleep(0.033)
 
         except asyncio.CancelledError:
             print("[EDGE STREAM] Stream loop halted.")
@@ -349,6 +447,14 @@ class RaspberryPiEdgeClient:
                     if self.capture_task and not self.capture_task.done():
                         self.capture_task.cancel()
                     self.release_camera()
+
+                elif mtype == "set_turbo_mode":
+                    target = data.get("target_device", "ALL")
+                    is_targeted = (target == "ALL" or target == self.device_id or target == self.device_name)
+                    if is_targeted:
+                        self.turbo_mode = bool(data.get("turbo", False))
+                        status_str = "⚡ TURBO 30 FPS MOTION BURST ACTIVATED" if self.turbo_mode else "🐢 STANDARD PACED MODE RESTORED"
+                        print(f"\n[EDGE TRIGGER] {status_str} for {self.device_name}")
 
                 elif mtype == "session_status":
                     target = data.get("target_device", "ALL")

@@ -396,6 +396,31 @@ async def websocket_endpoint(websocket: WebSocket):
                     await tracking_controller.process_frame(payload)
                     continue
 
+                if p_type == "toggle_turbo_mode":
+                    target_dev = payload.get("device_id", "ALL")
+                    turbo_state = bool(payload.get("turbo", False))
+                    print(f"[TURBO RELAY] ⚡ Setting Turbo Mode={turbo_state} for target: {target_dev}")
+
+                    if target_dev != "ALL" and target_dev in connected_devices:
+                        connected_devices[target_dev]["turbo_mode"] = turbo_state
+                    elif target_dev == "ALL":
+                        for dev in connected_devices:
+                            connected_devices[dev]["turbo_mode"] = turbo_state
+
+                    # Relay command to edge nodes
+                    await broadcast_json({
+                        "type": "set_turbo_mode",
+                        "target_device": target_dev,
+                        "turbo": turbo_state
+                    })
+
+                    # Broadcast devices update to dashboard
+                    await broadcast_json({
+                        "type": "devices_update",
+                        "devices": list(connected_devices.values())
+                    })
+                    continue
+
                 if p_type in ("heartbeat", "ping"):
                     await websocket.send_text(json.dumps({
                         "type": "pong", 
