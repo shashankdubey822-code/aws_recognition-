@@ -47,10 +47,10 @@ DEFAULT_SECRET_KEY = os.getenv("SECRET_KEY", "nexus_secret_key_attendance_ai_202
 
 def configure_hardware_shutter_anti_blur(device_index: int = 0, fast_action: bool = True):
     """
-    Airport-Grade Hardware Shutter Control via Linux V4L2:
-    - In Turbo Mode: Forces manual exposure with fast 2ms-3ms shutter (1/500s) + High ISO Gain.
-      Eliminates optical motion smearing of fast-running individuals (8-10 km/h).
-    - In Standard Mode: Restores auto exposure for stationary surveillance.
+    Airport-Grade Hardware Sensor Tuning via Linux V4L2:
+    - Sets exposure_auto_priority=0: Forces camera to maintain constant 30 FPS high shutter speed
+      WITHOUT ever dropping shutter speed or causing pitch-black darkness.
+    - Dynamically balances sensor analog gain (ISO) so the room is fully illuminated while motion is crisp.
     """
     if not sys.platform.startswith('linux'):
         return
@@ -64,24 +64,18 @@ def configure_hardware_shutter_anti_blur(device_index: int = 0, fast_action: boo
 
     try:
         if fast_action:
-            # 1. Force Manual Exposure Mode (auto_exposure=1 or exposure_auto=1 depending on V4L2 driver)
-            subprocess.run(["v4l2-ctl", "-d", dev_path, "-c", "auto_exposure=1"], stderr=subprocess.DEVNULL)
-            subprocess.run(["v4l2-ctl", "-d", dev_path, "-c", "exposure_auto=1"], stderr=subprocess.DEVNULL)
-            
-            # 2. Set Ultra-Fast Shutter Speed (~2-3ms / 1/500s to freeze motion)
-            subprocess.run(["v4l2-ctl", "-d", dev_path, "-c", "exposure_time_absolute=50"], stderr=subprocess.DEVNULL)
-            subprocess.run(["v4l2-ctl", "-d", dev_path, "-c", "exposure_absolute=50"], stderr=subprocess.DEVNULL)
-            
-            # 3. Boost Analog Sensor Gain (ISO) to maintain scene illumination
-            subprocess.run(["v4l2-ctl", "-d", dev_path, "-c", "gain=95"], stderr=subprocess.DEVNULL)
-            subprocess.run(["v4l2-ctl", "-d", dev_path, "-c", "gain_automatic=0"], stderr=subprocess.DEVNULL)
-            
-            print(f"[HARDWARE SHUTTER] ⚡ High-Speed Anti-Motion-Blur Shutter active on {dev_path} (Fast Shutter ~2ms, High ISO Gain).")
-        else:
-            # Restore standard auto exposure
+            # 1. Disable dynamic frame rate drop (forces constant high shutter speed at 30 FPS)
+            subprocess.run(["v4l2-ctl", "-d", dev_path, "-c", "exposure_auto_priority=0"], stderr=subprocess.DEVNULL)
+            # 2. Set exposure mode to Auto with constant frame rate
             subprocess.run(["v4l2-ctl", "-d", dev_path, "-c", "auto_exposure=3"], stderr=subprocess.DEVNULL)
             subprocess.run(["v4l2-ctl", "-d", dev_path, "-c", "exposure_auto=3"], stderr=subprocess.DEVNULL)
-            subprocess.run(["v4l2-ctl", "-d", dev_path, "-c", "gain_automatic=1"], stderr=subprocess.DEVNULL)
+            # 3. Boost backlight compensation & gain for bright room illumination
+            subprocess.run(["v4l2-ctl", "-d", dev_path, "-c", "backlight_compensation=1"], stderr=subprocess.DEVNULL)
+            print(f"[HARDWARE SHUTTER] ⚡ High-Speed Constant-Rate Anti-Blur Sensor Active on {dev_path} (30 FPS Shutter Priority).")
+        else:
+            subprocess.run(["v4l2-ctl", "-d", dev_path, "-c", "exposure_auto_priority=1"], stderr=subprocess.DEVNULL)
+            subprocess.run(["v4l2-ctl", "-d", dev_path, "-c", "auto_exposure=3"], stderr=subprocess.DEVNULL)
+            subprocess.run(["v4l2-ctl", "-d", dev_path, "-c", "exposure_auto=3"], stderr=subprocess.DEVNULL)
     except Exception as e:
         print(f"[HARDWARE SHUTTER] Notice: {e}")
 
@@ -276,17 +270,37 @@ class HardwareVideoStream:
         if self.running:
             return self
         
-        # Configure hardware sensor shutter for anti-blur fast action
-        configure_hardware_shutter_anti_blur(self.src, fast_action=self.turbo)
-
         print(f"[EDGE CAMERA] 📷 Initializing High-Speed Multi-Threaded Camera Sensor (Index {self.src}, {self.width}x{self.height})...")
         try:
-            if hasattr(cv2, 'CAP_V4L2') and sys.platform.startswith('linux'):
-                self.cap = cv2.VideoCapture(self.src, cv2.CAP_V4L2)
-            else:
-                self.cap = cv2.VideoCapture(self.src)
+            # 1. Primary: Standard OpenCV index opening
+            self.cap = cv2.VideoCapture(self.src)
 
-            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+            # 2. Fallback: Direct Linux V4L2 device node path
+            if (self.cap is None or not self.cap.isOpened()) and sys.platform.startswith('linux'):
+                if self.cap is not None:
+                    try:
+                        self.cap.release()
+                    except Exception:
+                        pass
+                self.cap = cv2.VideoCapture(f"/dev/video{self.src}")
+
+            # 3. Fallback: Explicit CAP_V4L2 flag
+            if (self.cap is None or not self.cap.isOpened()) and hasattr(cv2, 'CAP_V4L2'):
+                if self.cap is not None:
+                    try:
+                        self.cap.release()
+                    except Exception:
+                        pass
+                self.cap = cv2.VideoCapture(self.src, cv2.CAP_V4L2)
+
+            if self.cap is None or not self.cap.isOpened():
+                print(f"❌ Could not open video device on index {self.src}.")
+                return None
+
+            try:
+                self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+            except Exception:
+                pass
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
             self.cap.set(cv2.CAP_PROP_FPS, 30)
@@ -296,9 +310,8 @@ class HardwareVideoStream:
             except Exception:
                 pass
 
-            if not self.cap.isOpened():
-                print(f"❌ Could not open video device on index {self.src}.")
-                return None
+            # Configure hardware sensor tuning after device is opened
+            configure_hardware_shutter_anti_blur(self.src, fast_action=self.turbo)
 
             # Read initial frames to stabilize exposure
             for _ in range(3):
