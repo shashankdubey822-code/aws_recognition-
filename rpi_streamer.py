@@ -207,6 +207,7 @@ def generate_hmac_signature(secret_key: str, payload_str: str, timestamp_str: st
 def connect_websocket_universal(url: str, hf_token: str = None):
     """
     Universal WebSocket connection helper compatible across ALL websockets versions (10.x, 11.x, 12.x, 13.x, 14.x).
+    Configured with ping_interval=None to prevent false keepalive ping timeouts during high-throughput 30 FPS video streaming.
     """
     target_url = url
     if hf_token and "token=" not in url:
@@ -220,9 +221,9 @@ def connect_websocket_universal(url: str, hf_token: str = None):
         return websockets.connect(
             target_url, 
             additional_headers=headers, 
-            ping_interval=30, 
-            ping_timeout=120, 
-            max_size=20 * 1024 * 1024
+            ping_interval=None, 
+            ping_timeout=None, 
+            max_size=30 * 1024 * 1024
         )
     except TypeError:
         pass
@@ -232,9 +233,9 @@ def connect_websocket_universal(url: str, hf_token: str = None):
         return websockets.connect(
             target_url, 
             extra_headers=headers, 
-            ping_interval=30, 
-            ping_timeout=120, 
-            max_size=20 * 1024 * 1024
+            ping_interval=None, 
+            ping_timeout=None, 
+            max_size=30 * 1024 * 1024
         )
     except TypeError:
         pass
@@ -242,9 +243,9 @@ def connect_websocket_universal(url: str, hf_token: str = None):
     # Try 3: Standard (URL token authentication)
     return websockets.connect(
         target_url, 
-        ping_interval=30, 
-        ping_timeout=120, 
-        max_size=20 * 1024 * 1024
+        ping_interval=None, 
+        ping_timeout=None, 
+        max_size=30 * 1024 * 1024
     )
 
 class HardwareVideoStream:
