@@ -8,7 +8,8 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from services.face_detector import detect_faces_4k_ultra
 from services.aws_client import search_face_on_aws
 from services.email_service import send_attendance_email
-from core.helpers import get_time_str, get_date_str, parse_identity
+from services.attendance import parse_identity
+from core.timezone_utils import get_time_str, get_date_str
 
 class EventController:
     def __init__(self, broadcast_func=None):
