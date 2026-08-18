@@ -63,5 +63,8 @@ deploy.bat
 # --- Project Specific & AI Data ---
 static/intruders/
 static/attendees/
+static/event_photos/
+models/
+*.onnx
 *.pt
 yolo_test*

@@ -277,3 +277,6 @@ def send_session_email_report(session_data: dict = None, recipient: str = None, 
         err_msg = "🚨 RESEND_API_KEY is not configured! Please add 'RESEND_API_KEY' in Hugging Face Settings -> Variables and secrets."
         log_email_diagnostic("AUTH_ROUTE", "MISSING_KEY", err_msg)
         return False, err_msg
+
+# Backward-compatibility alias
+send_attendance_email = send_session_email_report

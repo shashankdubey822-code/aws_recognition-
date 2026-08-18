@@ -54,9 +54,37 @@ const ledgerSessionIdLabel = document.getElementById('ledger-session-id-label');
 // --- TABS & VIEWS ---
 const tabDashboardBtn = document.getElementById('tab-dashboard-btn');
 const tabDevicesBtn = document.getElementById('tab-devices-btn');
+const tabEventsBtn = document.getElementById('tab-events-btn');
 const viewDashboard = document.getElementById('view-dashboard');
 const viewDevices = document.getElementById('view-devices');
+const viewEvents = document.getElementById('view-events');
 const activeDevicesBadge = document.getElementById('active-devices-badge');
+
+// --- 4K EVENT SCANNER ELEMENTS ---
+const eventNameInput = document.getElementById('event-name-input');
+const eventDateInput = document.getElementById('event-date-input');
+const eventDeptInput = document.getElementById('event-dept-input');
+const eventDropzone = document.getElementById('event-dropzone');
+const eventFileInput = document.getElementById('event-file-input');
+const eventFileCountBadge = document.getElementById('event-file-count-badge');
+const eventFilePreviews = document.getElementById('event-file-previews');
+const eventStartBtn = document.getElementById('event-start-btn');
+const eventUploadPanel = document.getElementById('event-upload-panel');
+const eventProcessingHud = document.getElementById('event-processing-hud');
+const eventResultsPanel = document.getElementById('event-results-panel');
+const eventHudStatusLabel = document.getElementById('event-hud-status-label');
+const eventHudProgressPercent = document.getElementById('event-hud-progress-percent');
+const eventHudProgressBar = document.getElementById('event-hud-progress-bar');
+const eventDiagLogs = document.getElementById('event-diag-logs');
+const eventStatPhotos = document.getElementById('event-stat-photos');
+const eventStatFaces = document.getElementById('event-stat-faces');
+const eventStatAttendees = document.getElementById('event-stat-attendees');
+const eventStatEmail = document.getElementById('event-stat-email');
+const eventDownloadExcelBtn = document.getElementById('event-download-excel-btn');
+const eventNewScanBtn = document.getElementById('event-new-scan-btn');
+const eventAttendeesTbody = document.getElementById('event-attendees-tbody');
+
+let selectedEventFiles = [];
 
 // --- DEMO TESTER MODAL ---
 const openDemoBtn = document.getElementById('open-demo-btn');
@@ -236,22 +264,166 @@ function resetDiagChecklist() {
     if (regDiagLog) regDiagLog.innerHTML = '<div>[SYSTEM] Diagnostic engine standby. Ready for scan.</div>';
 }
 
-// --- TOP TABS SWITCHER (LIGHT GLASS) ---
-if (tabDashboardBtn && tabDevicesBtn) {
-    tabDashboardBtn.addEventListener('click', () => {
-        tabDashboardBtn.className = "px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-white text-sky-700 shadow-sm border border-slate-200/80";
-        tabDevicesBtn.className = "px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5";
-        viewDashboard.classList.remove('hidden');
-        viewDevices.classList.add('hidden');
-    });
+// --- TOP TABS SWITCHER (LIGHT GLASS 3-WAY) ---
+function switchMainTab(activeTab) {
+    // Reset all tabs
+    if (tabDashboardBtn) tabDashboardBtn.className = "px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all";
+    if (tabDevicesBtn) tabDevicesBtn.className = "px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5";
+    if (tabEventsBtn) tabEventsBtn.className = "px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5";
 
-    tabDevicesBtn.addEventListener('click', () => {
-        tabDevicesBtn.className = "px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-white text-sky-700 shadow-sm border border-slate-200/80 flex items-center gap-1.5";
-        tabDashboardBtn.className = "px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all";
-        viewDevices.classList.remove('hidden');
-        viewDashboard.classList.add('hidden');
+    if (viewDashboard) viewDashboard.classList.add('hidden');
+    if (viewDevices) viewDevices.classList.add('hidden');
+    if (viewEvents) viewEvents.classList.add('hidden');
+
+    if (activeTab === 'DASHBOARD') {
+        if (tabDashboardBtn) tabDashboardBtn.className = "px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-white text-sky-700 shadow-sm border border-slate-200/80";
+        if (viewDashboard) viewDashboard.classList.remove('hidden');
+    } else if (activeTab === 'DEVICES') {
+        if (tabDevicesBtn) tabDevicesBtn.className = "px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-white text-sky-700 shadow-sm border border-slate-200/80 flex items-center gap-1.5";
+        if (viewDevices) viewDevices.classList.remove('hidden');
         renderDevicesView();
-    });
+    } else if (activeTab === 'EVENTS') {
+        if (tabEventsBtn) tabEventsBtn.className = "px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-white text-indigo-700 shadow-sm border border-slate-200/80 flex items-center gap-1.5";
+        if (viewEvents) viewEvents.classList.remove('hidden');
+    }
+}
+
+if (tabDashboardBtn) tabDashboardBtn.addEventListener('click', () => switchMainTab('DASHBOARD'));
+if (tabDevicesBtn) tabDevicesBtn.addEventListener('click', () => switchMainTab('DEVICES'));
+if (tabEventsBtn) tabEventsBtn.addEventListener('click', () => switchMainTab('EVENTS'));
+
+// --- 4K EVENT SCANNER CONTROLLER ---
+function appendEventLog(msg, colorClass = "text-slate-300") {
+    if (!eventDiagLogs) return;
+    const div = document.createElement('div');
+    div.className = colorClass;
+    div.innerHTML = `<span class="text-slate-500 font-mono">[${new Date().toLocaleTimeString()}]</span> ${msg}`;
+    eventDiagLogs.appendChild(div);
+    eventDiagLogs.scrollTop = eventDiagLogs.scrollHeight;
+}
+
+function handleEventFilesSelected(files) {
+    if (!files || files.length === 0) return;
+    selectedEventFiles = Array.from(files);
+
+    if (eventFileCountBadge) {
+        eventFileCountBadge.textContent = `${selectedEventFiles.length} Photos Selected`;
+        eventFileCountBadge.className = "text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 border border-sky-200";
+    }
+
+    if (eventStartBtn) {
+        eventStartBtn.disabled = false;
+    }
+
+    if (eventFilePreviews) {
+        eventFilePreviews.innerHTML = '';
+        eventFilePreviews.classList.remove('hidden');
+
+        selectedEventFiles.forEach((file, idx) => {
+            const card = document.createElement('div');
+            card.className = "relative rounded-xl overflow-hidden aspect-video bg-slate-900 border border-slate-200 shadow-sm group";
+            
+            const img = document.createElement('img');
+            img.className = "w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-all";
+            img.src = URL.createObjectURL(file);
+            
+            const badge = document.createElement('span');
+            badge.className = "absolute bottom-1 left-1 text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-slate-900/80 text-white truncate max-w-[90%]";
+            badge.textContent = `#${idx + 1} ${(file.size / (1024 * 1024)).toFixed(1)}MB`;
+
+            card.appendChild(img);
+            card.appendChild(badge);
+            eventFilePreviews.appendChild(card);
+        });
+    }
+}
+
+if (eventDropzone && eventFileInput) {
+    eventDropzone.onclick = () => eventFileInput.click();
+    eventFileInput.onchange = (e) => handleEventFilesSelected(e.target.files);
+
+    eventDropzone.ondragover = (e) => {
+        e.preventDefault();
+        eventDropzone.classList.add('border-sky-500', 'bg-sky-100/50');
+    };
+    eventDropzone.ondragleave = () => {
+        eventDropzone.classList.remove('border-sky-500', 'bg-sky-100/50');
+    };
+    eventDropzone.ondrop = (e) => {
+        e.preventDefault();
+        eventDropzone.classList.remove('border-sky-500', 'bg-sky-100/50');
+        if (e.dataTransfer && e.dataTransfer.files) {
+            handleEventFilesSelected(e.dataTransfer.files);
+        }
+    };
+}
+
+if (eventStartBtn) {
+    eventStartBtn.onclick = async () => {
+        if (!selectedEventFiles || selectedEventFiles.length === 0) {
+            showToast("Please select at least one 4K event photo.", "error");
+            return;
+        }
+
+        const eventTitle = (eventNameInput && eventNameInput.value.trim()) || "Annual Faculty Seminar";
+        const eventDate = (eventDateInput && eventDateInput.value) || new Date().toISOString().split('T')[0];
+        const eventDept = (eventDeptInput && eventDeptInput.value.trim()) || "Main Auditorium";
+
+        const formData = new FormData();
+        formData.append("event_name", eventTitle);
+        formData.append("event_date", eventDate);
+        formData.append("event_dept", eventDept);
+
+        selectedEventFiles.forEach((file) => {
+            formData.append("photos", file);
+        });
+
+        // Switch to Processing HUD
+        if (eventUploadPanel) eventUploadPanel.classList.add('hidden');
+        if (eventResultsPanel) eventResultsPanel.classList.add('hidden');
+        if (eventProcessingHud) eventProcessingHud.classList.remove('hidden');
+
+        if (eventDiagLogs) eventDiagLogs.innerHTML = '';
+        appendEventLog(`🚀 Uploading ${selectedEventFiles.length} photos (${eventTitle}) to 4K SAHI Engine...`, 'text-sky-400 font-bold');
+
+        try {
+            const resp = await fetch('/api/event/upload', {
+                method: 'POST',
+                body: formData
+            });
+            const resJson = await resp.json();
+
+            if (!resJson.success) {
+                appendEventLog(`🔴 Server Error: ${resJson.detail || resJson.message}`, 'text-rose-400 font-bold');
+                showToast(resJson.detail || resJson.message, "error");
+            } else {
+                appendEventLog(`✅ Upload received (${resJson.total_photos} photos). Sliced High-Density inference running...`, 'text-emerald-400');
+            }
+        } catch (err) {
+            appendEventLog(`🔴 Network error during upload: ${err.message}`, 'text-rose-400 font-bold');
+            showToast(`Upload failed: ${err.message}`, "error");
+        }
+    };
+}
+
+if (eventNewScanBtn) {
+    eventNewScanBtn.onclick = () => {
+        selectedEventFiles = [];
+        if (eventFileInput) eventFileInput.value = '';
+        if (eventFileCountBadge) {
+            eventFileCountBadge.textContent = "0 Photos Selected";
+            eventFileCountBadge.className = "text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200";
+        }
+        if (eventFilePreviews) {
+            eventFilePreviews.innerHTML = '';
+            eventFilePreviews.classList.add('hidden');
+        }
+        if (eventStartBtn) eventStartBtn.disabled = true;
+
+        if (eventResultsPanel) eventResultsPanel.classList.add('hidden');
+        if (eventProcessingHud) eventProcessingHud.classList.add('hidden');
+        if (eventUploadPanel) eventUploadPanel.classList.remove('hidden');
+    };
 }
 
 // --- DEMO TESTER MODAL HANDLERS ---
@@ -999,6 +1171,87 @@ function connectWebSocket() {
             isProcessing = false;
             logToTerminal(data.message, "error");
             showToast(data.message, "error");
+            return;
+        }
+
+        // --- 4K EVENT SCANNER INGESTION MESSAGES ---
+        if (data.type === 'event_started') {
+            appendEventLog(`🏁 ${data.message}`, 'text-sky-400 font-bold');
+            if (eventHudProgressPercent) eventHudProgressPercent.textContent = '5%';
+            if (eventHudProgressBar) eventHudProgressBar.style.width = '5%';
+            return;
+        }
+
+        if (data.type === 'event_progress') {
+            const pct = Math.max(5, Math.min(95, Math.round((data.frame_index / data.total_frames) * 90)));
+            if (eventHudProgressPercent) eventHudProgressPercent.textContent = `${pct}%`;
+            if (eventHudProgressBar) eventHudProgressBar.style.width = `${pct}%`;
+            if (eventHudStatusLabel) {
+                eventHudStatusLabel.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-sky-500 animate-ping"></span> ${data.message}`;
+            }
+            appendEventLog(`[FRAME ${data.frame_index}/${data.total_frames}] ${data.message}`, data.faces_found ? 'text-indigo-300 font-bold' : 'text-slate-300');
+            return;
+        }
+
+        if (data.type === 'event_frame_completed') {
+            appendEventLog(`✅ Frame ${data.frame_index}/${data.total_frames} complete (${data.faces_detected} faces extracted, ${data.matched_count} cloud verified). Total unique attendees: ${data.current_unique_total}`, 'text-emerald-300 font-bold');
+            return;
+        }
+
+        if (data.type === 'event_completed') {
+            if (eventHudProgressPercent) eventHudProgressPercent.textContent = '100%';
+            if (eventHudProgressBar) eventHudProgressBar.style.width = '100%';
+            appendEventLog(`🎉 ${data.message}`, 'text-emerald-400 font-bold text-sm');
+            showToast(data.message, 'success');
+
+            // Populate Results Panel
+            if (eventStatPhotos) eventStatPhotos.textContent = data.total_frames;
+            if (eventStatFaces) eventStatFaces.textContent = data.total_faces_detected;
+            if (eventStatAttendees) eventStatAttendees.textContent = data.unique_attendees_count;
+            if (eventStatEmail) {
+                eventStatEmail.textContent = data.email_sent ? 'EMAILED ✓' : 'STANDBY';
+                eventStatEmail.className = data.email_sent 
+                    ? 'text-xs font-bold font-mono text-emerald-700 mt-2 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200 inline-block'
+                    : 'text-xs font-bold font-mono text-slate-500 mt-2 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200 inline-block';
+            }
+            if (eventDownloadExcelBtn) {
+                eventDownloadExcelBtn.href = data.report_url;
+            }
+
+            // Populate Attendees Table
+            if (eventAttendeesTbody) {
+                eventAttendeesTbody.innerHTML = '';
+                if (!data.attendees || data.attendees.length === 0) {
+                    eventAttendeesTbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-slate-400 font-mono">No matching registered faculty/students found in uploaded event photos.</td></tr>`;
+                } else {
+                    data.attendees.forEach((att, idx) => {
+                        const tr = document.createElement('tr');
+                        tr.className = "hover:bg-slate-50 transition-colors";
+                        tr.innerHTML = `
+                            <td class="p-3 text-center text-slate-400 font-bold">${idx + 1}</td>
+                            <td class="p-3 font-bold text-slate-800">${att.roll_number || 'N/A'}</td>
+                            <td class="p-3 font-semibold text-slate-900 flex items-center gap-2">
+                                <div class="w-6 h-6 rounded-full bg-sky-100 text-sky-700 flex items-center justify-center font-bold text-[10px]">
+                                    ${(att.name || 'U').charAt(0)}
+                                </div>
+                                <span>${att.name}</span>
+                            </td>
+                            <td class="p-3 text-center font-mono text-emerald-600 font-bold">${att.confidence}%</td>
+                            <td class="p-3 text-center text-slate-600 font-mono">${att.seen_count} photo(s)</td>
+                            <td class="p-3 text-center">
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                    PRESENT ✓
+                                </span>
+                            </td>
+                        `;
+                        eventAttendeesTbody.appendChild(tr);
+                    });
+                }
+            }
+
+            // Show results view
+            if (eventProcessingHud) eventProcessingHud.classList.add('hidden');
+            if (eventResultsPanel) eventResultsPanel.classList.remove('hidden');
             return;
         }
 

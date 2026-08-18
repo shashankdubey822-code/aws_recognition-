@@ -1,10 +1,12 @@
 import os
+import time
+import secrets
 import shutil
 import asyncio
 import pandas as pd
 import datetime
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Response, Request, Form, HTTPException, status
+from fastapi import FastAPI, Response, Request, Form, HTTPException, status, UploadFile, File, BackgroundTasks
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -20,11 +22,15 @@ from core.state import (
     attendance_memory, PRESENT_IDENTITIES, last_seen, 
     temporal_memory, active_session, connected_devices
 )
-from api.websocket import websocket_endpoint, end_active_session
+from api.websocket import websocket_endpoint, end_active_session, broadcast_json
+from api.controllers.event_controller import EventController
 from services.aws_client import ensure_collection_exists, delete_all_faces
 from services.email_service import generate_session_excel, get_latest_email_diagnostics
 
 AUTH_TOKEN_VALUE = "teacher_authenticated_valid_session"
+
+# Initialize EventController for 4K batch photo processing
+event_controller = EventController(broadcast_func=broadcast_json)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -185,14 +191,56 @@ async def download_logs(request: Request):
         return {"error": f"Failed to generate log: {e}"}
 
 @app.get("/reports/{filename}")
-async def download_report_file(filename: str, request: Request):
-    """Download a generated session Excel / CSV report."""
+@app.get("/api/download_report/{filename}")
+async def download_report_file(filename: str, request: Request = None):
+    """Download a generated session or event Excel / CSV report."""
     filepath = os.path.join(REPORTS_DIR, filename)
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="Report file not found.")
         
     media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if filename.endswith(".xlsx") else "text/csv"
     return FileResponse(filepath, media_type=media_type, filename=filename)
+
+@app.post("/api/event/upload")
+async def upload_event_photos(
+    background_tasks: BackgroundTasks,
+    event_name: str = Form("College Event / Seminar"),
+    event_date: str = Form(""),
+    event_dept: str = Form("Main Auditorium"),
+    photos: list[UploadFile] = File(...)
+):
+    """Batch upload high-resolution 4K event photos for background multi-tile AI processing."""
+    if not photos:
+        raise HTTPException(status_code=400, detail="No photos uploaded.")
+
+    event_id = f"evt_{int(time.time())}_{secrets.token_hex(3)}"
+    
+    # Read files into memory
+    file_payloads = []
+    for p in photos:
+        content = await p.read()
+        file_payloads.append({
+            "filename": p.filename,
+            "bytes": content
+        })
+
+    # Start asynchronous event processing pipeline
+    background_tasks.add_task(
+        event_controller.process_event_batch,
+        event_id,
+        event_name,
+        event_date,
+        event_dept,
+        file_payloads
+    )
+
+    return {
+        "success": True,
+        "event_id": event_id,
+        "event_name": event_name,
+        "total_photos": len(photos),
+        "message": f"Successfully received {len(photos)} event photos. 4K Sliced AI processing initiated."
+    }
 
 @app.get("/api/email_diagnostics", response_class=PlainTextResponse)
 async def get_email_error_diagnostics():
