@@ -37,6 +37,14 @@ import numpy as np
 import websockets
 import cv2
 
+# Safe UTF-8 reconfiguration for console compatibility across all platforms
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 # ==============================================================================
 # Central Configuration & Defaults
 # ==============================================================================
@@ -1072,7 +1080,7 @@ def parse_cli_args():
     parser.add_argument("--interval", type=float, default=DEFAULT_INTERVAL_SEC, help="Standard Pacing Interval in Seconds")
     parser.add_argument("--secret", "--secret-key", dest="secret_key", default=DEFAULT_SECRET_KEY, help="HMAC Secret Key")
     parser.add_argument("--hf-token", default=None, help="Hugging Face Space Access Token")
-    parser.add_argument("--turbo", action="store_true", help="Start directly in ⚡ Turbo 30 FPS Video Mode")
+    parser.add_argument("--turbo", action="store_true", help="Start directly in Turbo 30 FPS Video Mode")
     parser.add_argument("--headless", action="store_true", help="Run without GUI displays")
     parser.add_argument("--debug", "--verbose", action="store_true", help="Enable verbose debug logs")
     return parser.parse_args()
