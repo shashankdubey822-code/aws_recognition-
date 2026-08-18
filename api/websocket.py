@@ -381,7 +381,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     await reg_controller.process_frame(payload)
                     continue
 
-                # --- 5. Surveillance Tracking Frame Ingestion ---
+                # --- 5. Direct Edge AI Best-Shot Face Crop Ingestion ---
+                if p_type == "face_crop":
+                    await tracking_controller.process_face_crop(payload)
+                    continue
+
+                # --- 6. Surveillance Tracking Frame Ingestion ---
                 if p_type == "frame":
                     is_demo = payload.get("is_demo", False)
                     dev_id = payload.get("device_id", registered_edge_id or "web_demo")

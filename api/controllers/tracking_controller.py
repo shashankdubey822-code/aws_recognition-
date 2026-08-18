@@ -267,3 +267,135 @@ class TrackingController:
             "stage": "IDLE",
             "message": f"Cycle Complete ({len(valid_faces)} Faces Processed)"
         })
+
+    async def process_face_crop(self, payload: dict):
+        """
+        Instant Edge AI Best-Shot Ingestion:
+        Receives a pre-cropped, unblurred 15KB face thumbnail harvested directly on the Raspberry Pi.
+        Instantly queries AWS Rekognition with 0 decoding overhead and sub-100ms response time.
+        """
+        dev_id = payload.get("device_id", "edge_device")
+        crop_b64_str = payload.get("crop_image", "")
+        if not crop_b64_str:
+            return
+
+        if crop_b64_str.startswith("data:image"):
+            encoded_data = crop_b64_str.split(",")[1]
+        else:
+            encoded_data = crop_b64_str
+
+        crop_bytes = base64.b64decode(encoded_data)
+        current_time_str = payload.get("timestamp") or get_time_str()
+        dev_name = payload.get("device_name", "Classroom 101")
+        velocity = payload.get("velocity", 0.0)
+        sharpness = payload.get("sharpness", 100.0)
+
+        # 1. Save crop to disk for reporting
+        os.makedirs("static/crops", exist_ok=True)
+        crop_filename = f"crop_{dev_id}_{get_compact_timestamp_str()}_{int(time.time()*1000)%100000}.jpg"
+        crop_filepath = os.path.join("static/crops", crop_filename)
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, lambda: open(crop_filepath, "wb").write(crop_bytes))
+        except Exception:
+            pass
+
+        # 2. Enqueue in FIFO Queue
+        q_id = f"q_edge_{int(time.time()*1000)}"
+        q_item = {
+            "id": q_id,
+            "queue_label": f"Edge Best-Shot ({velocity} km/h)",
+            "time": current_time_str,
+            "crop": f"data:image/jpeg;base64,{encoded_data}",
+            "status": "scanning",
+            "name": f"Fast Runner ({velocity} km/h)",
+            "roll_number": "Scanning AWS...",
+            "score": 0.0,
+            "result": f"⚡ [EDGE AI] Best-shot dispatched to AWS..."
+        }
+
+        if dev_id in connected_devices:
+            if "cropped_queue" not in connected_devices[dev_id]:
+                connected_devices[dev_id]["cropped_queue"] = []
+            connected_devices[dev_id]["cropped_queue"].insert(0, q_item)
+            if len(connected_devices[dev_id]["cropped_queue"]) > 40:
+                connected_devices[dev_id]["cropped_queue"] = connected_devices[dev_id]["cropped_queue"][:40]
+
+            await self.broadcast_event({
+                "type": "device_stage_update",
+                "device_id": dev_id,
+                "stage": "AWS_MATCHING",
+                "message": f"⚡ Edge AI: Matching Best-Shot against AWS..."
+            })
+            await self.broadcast_event({
+                "type": "aws_queue_update",
+                "device_id": dev_id,
+                "queue": connected_devices[dev_id]["cropped_queue"]
+            })
+
+        # 3. Direct AWS Search
+        match_res = await asyncio.to_thread(search_face_on_aws, crop_bytes)
+        if isinstance(match_res, list):
+            match_res = match_res[0] if len(match_res) > 0 else {"match": False, "identity": "Unknown", "score": 0.0}
+        elif not isinstance(match_res, dict):
+            match_res = {"match": False, "identity": "Unknown", "score": 0.0}
+
+        if match_res.get("match"):
+            identity_str = match_res.get("identity", "Unknown")
+            score = match_res.get("score", 95.0)
+            display_name, roll_no = parse_identity(identity_str)
+
+            q_item["status"] = "match"
+            q_item["name"] = display_name
+            q_item["roll_number"] = roll_no
+            q_item["score"] = round(score, 1)
+            q_item["result"] = f"✅ MATCH: {display_name} ({roll_no}) — {score:.1f}%"
+
+            # Persist attendance
+            is_new = mark_attendance(identity_str, dev_id, current_time_str)
+            print(f"\n[EDGE AI ATTENDANCE] 🎯 SUCCESS: {display_name} ({roll_no}) verified from {dev_name} ({dev_id}) at {current_time_str} IST (New: {is_new})\n")
+
+            student_entry = {
+                "name": display_name,
+                "roll_number": roll_no,
+                "time": current_time_str,
+                "photo": f"/static/crops/{crop_filename}"
+            }
+            if dev_id in connected_devices:
+                if "verified_students" not in connected_devices[dev_id]:
+                    connected_devices[dev_id]["verified_students"] = []
+                if not any(s.get("name") == display_name for s in connected_devices[dev_id]["verified_students"]):
+                    connected_devices[dev_id]["verified_students"].insert(0, student_entry)
+
+            await self.broadcast_event({
+                "type": "attendance",
+                "name": display_name,
+                "roll_number": roll_no,
+                "time": current_time_str,
+                "device_id": dev_name or dev_id,
+                "photo": f"/static/crops/{crop_filename}"
+            })
+        else:
+            q_item["status"] = "no_match"
+            q_item["name"] = "Unknown Entity"
+            q_item["roll_number"] = "N/A"
+            q_item["result"] = f"❌ NO MATCH IN AWS DATABASE ({match_res.get('message', 'Unregistered Person')})"
+            print(f"[EDGE AI ATTENDANCE] ❌ Face harvested at {velocity} km/h (Sharpness: {sharpness:.0f}) — not found in AWS collection.")
+
+        if dev_id in connected_devices:
+            await self.broadcast_event({
+                "type": "aws_queue_update",
+                "device_id": dev_id,
+                "queue": connected_devices[dev_id]["cropped_queue"]
+            })
+            await self.broadcast_event({
+                "type": "devices_update",
+                "devices": list(connected_devices.values())
+            })
+
+        await self.broadcast_event({
+            "type": "device_stage_update",
+            "device_id": dev_id,
+            "stage": "IDLE",
+            "message": "Edge AI Cycle Ready"
+        })
