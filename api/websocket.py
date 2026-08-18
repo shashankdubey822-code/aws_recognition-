@@ -25,7 +25,7 @@ from core.timezone_utils import (
     get_timestamp_full_str,
     get_compact_timestamp_str
 )
-from services.attendance import mark_attendance
+from services.attendance import mark_attendance, create_session_record, update_session_record
 from services.email_service import send_session_email_report
 from api.controllers.registration_controller import RegistrationController
 from api.controllers.tracking_controller import TrackingController
@@ -72,14 +72,14 @@ async def wait_for_in_flight_aws_scans(max_wait_seconds: float = 6.0):
             for item in queue:
                 if item.get("status") == "scanning":
                     pending_count += 1
-            if dev_data.get("stage") == "AWS_MATCHING":
+            if dev_data.get("stage") in ("CROPPING", "AWS_MATCHING", "PROCESSING"):
                 pending_count += 1
 
         if pending_count == 0:
             break
         
         print(f"[SESSION FLUSH] ⏳ Waiting for {pending_count} pending face scans to complete before emailing report...")
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.25)
 
 
 async def end_active_session(reason: str = "Teacher Manual Stop"):
@@ -140,6 +140,14 @@ async def end_active_session(reason: str = "Teacher Manual Stop"):
     active_session["attendees"] = attendees
     active_session["finishing"] = False
     active_session["end_time"] = time.time()
+
+    # Persist session conclusion to SQLite sessions table
+    update_session_record(
+        session_id=session_id,
+        end_time=get_timestamp_full_str(),
+        status="COMPLETED" if "Concluded" in reason else "STOPPED",
+        total_attendees=len(attendees)
+    )
 
     # 4. Broadcast final stop status to UI
     await broadcast_json({
@@ -278,6 +286,14 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     session_timer_task = asyncio.create_task(auto_stop_session_timer(duration * 60))
                     
+                    # Persist session to SQLite sessions table
+                    create_session_record(
+                        session_id=session_id,
+                        duration_minutes=duration,
+                        start_time=get_timestamp_full_str(),
+                        status="ACTIVE"
+                    )
+
                     print(f"[SESSION] ▶️ Started session {session_id} for {duration} mins. Target: {target_device} (24h IST: {get_time_str()}).")
                     
                     await broadcast_json({

@@ -5,7 +5,7 @@ import threading
 import re
 from core.config import LOG_FILE, COOL_DOWN_SEC
 from core.state import attendance_memory, last_seen, active_session, connected_devices, DB_PATH
-from core.timezone_utils import get_time_str, get_date_str, get_now
+from core.timezone_utils import get_time_str, get_date_str, get_timestamp_full_str, get_now
 
 # Threading lock to prevent CSV/DB corruption during high-speed recognition
 attendance_lock = threading.Lock()
@@ -60,22 +60,25 @@ def parse_identity(raw_id: str):
     else:
         return clean_id.title(), "N/A"
 
-def mark_attendance(raw_identity: str, image_bytes: bytes = None, device_id: str = "edge_device"):
+def mark_attendance(raw_identity: str, image_bytes: bytes = None, device_id: str = "edge_device", session_id: str = None) -> tuple[bool, str, str, str]:
     """
     Marks attendance for a verified student in 24-hour IST local time.
     Tracks attendance per active session and per classroom device node.
-    Always returns: (status_bool, name, roll_number, time_str)
+    Always returns: (is_new_marked, name, roll_number, timestamp_ist_str)
     """
     now_epoch = time.time()
     name, roll_number = parse_identity(raw_identity)
     time_str = get_time_str() # 24-hour local time (e.g. 16:45:38)
     date_str = get_date_str() # Local date (e.g. 2026-08-16)
+    timestamp_ist = get_timestamp_full_str() # Full 24-hour IST timestamp (YYYY-MM-DD HH:MM:SS)
     photo_path = None
     
     with attendance_lock:
+        active_sess_id = session_id or (active_session["id"] if (active_session.get("active") or active_session.get("finishing")) else "GENERAL")
+        
         # Check if student is already verified in this active session
         is_already_in_session = False
-        if active_session.get("active"):
+        if active_session.get("active") or active_session.get("finishing"):
             is_already_in_session = any(
                 (e.get('name') == name and e.get('roll_number') == roll_number) or e.get('name') == name
                 for e in active_session.get("attendees", [])
@@ -90,7 +93,7 @@ def mark_attendance(raw_identity: str, image_bytes: bytes = None, device_id: str
             )
 
         # 1. Save student snapshot photo safely
-        if image_bytes:
+        if image_bytes and isinstance(image_bytes, bytes):
             try:
                 os.makedirs("static/attendees", exist_ok=True)
                 timestamp_int = int(now_epoch)
@@ -109,13 +112,15 @@ def mark_attendance(raw_identity: str, image_bytes: bytes = None, device_id: str
             "name": name,
             "time": time_str,
             "date": date_str,
+            "timestamp": timestamp_ist,
             "photo": photo_path,
-            "device_id": device_id
+            "device_id": device_id,
+            "session_id": active_sess_id
         }
 
-        # If already marked in current active session, still return True with student info so UI displays verification
+        # If already marked in current active session and device, still return True with student info
         if is_already_in_session and is_already_in_device:
-            return True, name, roll_number, time_str
+            return True, name, roll_number, timestamp_ist
 
         # 3. Add to In-Memory Global List (Top of list)
         attendance_memory.insert(0, entry)
@@ -143,17 +148,66 @@ def mark_attendance(raw_identity: str, image_bytes: bytes = None, device_id: str
         except Exception as e:
             print(f"⚠️ CSV Write Error: {e}")
 
-        # 7. Write to SQLite Database
+        # 7. Write to SQLite Database with Explicit 24-hour IST timestamp
         try:
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            session_id = active_session["id"] if active_session.get("active") else "GENERAL"
-            cursor.execute("INSERT INTO attendance (roll_number, name, session_id, device_id) VALUES (?, ?, ?, ?)",
-                           (roll_number, name, session_id, device_id))
+            cursor.execute(
+                "INSERT INTO attendance (roll_number, name, time, session_id, device_id) VALUES (?, ?, ?, ?, ?)",
+                (roll_number, name, timestamp_ist, active_sess_id, device_id)
+            )
             conn.commit()
             conn.close()
         except Exception as db_err:
             print(f"⚠️ DB Error: {db_err}")
 
-        print(f"✅ [ATTENDANCE MARKED] {name} (Roll: {roll_number}) via {device_id} at {time_str} IST")
-        return True, name, roll_number, time_str
+        print(f"✅ [ATTENDANCE MARKED] {name} (Roll: {roll_number}) via {device_id} at {timestamp_ist} IST")
+        return True, name, roll_number, timestamp_ist
+
+def create_session_record(session_id: str, duration_minutes: int, start_time: str = None, status: str = "ACTIVE") -> bool:
+    """Creates a new record in SQLite sessions table with 24-hour IST timestamps."""
+    start_ts = start_time or get_timestamp_full_str()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR REPLACE INTO sessions (session_id, start_time, end_time, duration_minutes, status, total_attendees, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (session_id, start_ts, None, duration_minutes, status, 0, start_ts)
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ Failed to create session record {session_id}: {e}")
+        return False
+
+def update_session_record(session_id: str, end_time: str = None, status: str = "COMPLETED", total_attendees: int = 0) -> bool:
+    """Updates an existing session record in SQLite upon session stop/completion."""
+    end_ts = end_time or get_timestamp_full_str()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE sessions SET end_time = ?, status = ?, total_attendees = ? WHERE session_id = ?",
+            (end_ts, status, total_attendees, session_id)
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ Failed to update session record {session_id}: {e}")
+        return False
+
+def get_session_by_id(session_id: str) -> dict | None:
+    """Fetches session metadata and attendee count from SQLite."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM sessions WHERE session_id = ?", (session_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        print(f"⚠️ Error fetching session {session_id}: {e}")
+        return None

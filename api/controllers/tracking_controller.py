@@ -8,7 +8,7 @@ from fastapi import WebSocket
 from services.aws_client import search_face_on_aws, register_face_to_aws
 from services.attendance import mark_attendance, parse_identity
 from services.face_detector import detect_faces_crowd
-from core.config import MIN_FACE_AREA
+from core.config import MIN_FACE_AREA, FRAME_RATE_LIMIT_SEC
 from core.state import connected_devices, active_session
 from core.timezone_utils import get_time_str, get_compact_timestamp_str
 
@@ -16,7 +16,9 @@ class TrackingController:
     def __init__(self, websocket: WebSocket, broadcast_func=None):
         self.websocket = websocket
         self.broadcast_func = broadcast_func or websocket.send_json
-        self.last_frame_times = {}
+        self.last_frame_times = {}       # For streaming gap pacing (0.033s in turbo)
+        self.last_disk_save_times = {}   # For disk archival rate-limiting (15s)
+        self.last_ai_detect_times = {}   # For local SCRFD inference pacing (1.5s)
 
     async def broadcast_event(self, event_dict: dict):
         """Dispatches telemetry event to ALL connected dashboard browsers."""
@@ -33,11 +35,10 @@ class TrackingController:
         is_demo = payload.get("is_demo", False)
         is_turbo = payload.get("turbo_active", False)
 
-        # Server-side deduplication guard:
-        # - In Turbo Mode: Allow high-rate 20-30 FPS video streaming (min gap >= 0.033s)
-        # - In Standard Mode: Maintain 2.5s pacing
+        now_epoch = time.time()
+
+        # 1. Real-Time Streaming Pacing Guard (30 FPS Turbo = 0.033s, Standard = 2.5s)
         if not is_demo:
-            now_epoch = time.time()
             last_epoch = self.last_frame_times.get(dev_id, 0.0)
             min_gap = 0.033 if is_turbo else 2.5
             if (now_epoch - last_epoch) < min_gap:
@@ -51,56 +52,75 @@ class TrackingController:
         client_ip = payload.get("ip", "127.0.0.1")
         current_time_str = payload.get("timestamp") or get_time_str()
 
-        # -------------------------------------------------------------
-        # 1. PERSIST & BROADCAST RAW UNCROPPED FRAME
-        # -------------------------------------------------------------
-        os.makedirs("static/raw_frames", exist_ok=True)
-        raw_filename = f"raw_{dev_id}_{get_compact_timestamp_str()}_{int(time.time()*1000)%100000}.jpg"
-        raw_filepath = os.path.join("static/raw_frames", raw_filename)
-        
-        try:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, lambda: open(raw_filepath, "wb").write(image_bytes))
-        except Exception as e:
-            print(f"⚠️ Error saving raw frame: {e}")
-
-        raw_frame_url = f"/static/raw_frames/{raw_filename}"
-        raw_record = {
-            "url": raw_frame_url,
-            "timestamp": current_time_str,
-            "ip": client_ip,
-            "device_id": dev_id,
-            "device_name": dev_name
-        }
-
-        # Update connected device state in memory
+        # Update in-memory telemetry & live state for device
         if dev_id in connected_devices:
-            if "raw_frames" not in connected_devices[dev_id]:
-                connected_devices[dev_id]["raw_frames"] = []
-            connected_devices[dev_id]["raw_frames"].insert(0, raw_record)
-            if len(connected_devices[dev_id]["raw_frames"]) > 30:
-                connected_devices[dev_id]["raw_frames"] = connected_devices[dev_id]["raw_frames"][:30]
-            
             connected_devices[dev_id]["total_frames"] = (connected_devices[dev_id].get("total_frames", 0)) + 1
             connected_devices[dev_id]["last_seen"] = current_time_str
             connected_devices[dev_id]["status"] = "active"
 
-        # Record into active session for email attachments
-        if active_session.get("active") or active_session.get("finishing"):
-            if "session_raw_frames" not in active_session:
-                active_session["session_raw_frames"] = []
-            if raw_filepath not in active_session["session_raw_frames"]:
-                active_session["session_raw_frames"].append(raw_filepath)
+        # -------------------------------------------------------------
+        # 2. RATE-LIMITED DISK ARCHIVAL (1 frame / 15s or motion trigger)
+        # -------------------------------------------------------------
+        save_interval = FRAME_RATE_LIMIT_SEC if not is_turbo else max(5.0, FRAME_RATE_LIMIT_SEC)
+        last_disk_save = self.last_disk_save_times.get(dev_id, 0.0)
+        motion_active = payload.get("motion_active", False)
+        motion_triggered = motion_active and (now_epoch - last_disk_save >= 3.0)
+        should_save_to_disk = is_demo or (now_epoch - last_disk_save >= save_interval) or motion_triggered
 
-        # Broadcast new raw frame directly to dashboards
-        await self.broadcast_event({
-            "type": "new_raw_frame",
-            "device_id": dev_id,
-            "frame": raw_record
-        })
+        if should_save_to_disk:
+            self.last_disk_save_times[dev_id] = now_epoch
+            os.makedirs("static/raw_frames", exist_ok=True)
+            raw_filename = f"raw_{dev_id}_{get_compact_timestamp_str()}_{int(now_epoch*1000)%100000}.jpg"
+            raw_filepath = os.path.join("static/raw_frames", raw_filename)
+            
+            try:
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, lambda: open(raw_filepath, "wb").write(image_bytes))
+                raw_frame_url = f"/static/raw_frames/{raw_filename}"
+
+                raw_record = {
+                    "url": raw_frame_url,
+                    "timestamp": current_time_str,
+                    "ip": client_ip,
+                    "device_id": dev_id,
+                    "device_name": dev_name
+                }
+
+                if dev_id in connected_devices:
+                    if "raw_frames" not in connected_devices[dev_id]:
+                        connected_devices[dev_id]["raw_frames"] = []
+                    connected_devices[dev_id]["raw_frames"].insert(0, raw_record)
+                    if len(connected_devices[dev_id]["raw_frames"]) > 30:
+                        connected_devices[dev_id]["raw_frames"] = connected_devices[dev_id]["raw_frames"][:30]
+
+                if active_session.get("active") or active_session.get("finishing"):
+                    if "session_raw_frames" not in active_session:
+                        active_session["session_raw_frames"] = []
+                    # Cap session raw frames to 25 to protect email report attachments
+                    if len(active_session["session_raw_frames"]) < 25 and raw_filepath not in active_session["session_raw_frames"]:
+                        active_session["session_raw_frames"].append(raw_filepath)
+
+                await self.broadcast_event({
+                    "type": "new_raw_frame",
+                    "device_id": dev_id,
+                    "frame": raw_record
+                })
+            except Exception as e:
+                print(f"⚠️ Error saving raw frame: {e}")
 
         # -------------------------------------------------------------
-        # 2. BROADCAST STAGE: LOCAL AI FACE CROPPING
+        # 3. AI FACE CROPPING PACING
+        # -------------------------------------------------------------
+        # In Turbo Mode, edge devices send pre-cropped faces directly via 'face_crop' events.
+        # Run server-side SCRFD detection only when saving to disk or with paced cooldown (1.5s).
+        last_ai_detect = self.last_ai_detect_times.get(dev_id, 0.0)
+        if is_turbo and (now_epoch - last_ai_detect < 1.5) and not should_save_to_disk:
+            return
+
+        self.last_ai_detect_times[dev_id] = now_epoch
+
+        # -------------------------------------------------------------
+        # 4. BROADCAST STAGE: LOCAL AI FACE CROPPING
         # -------------------------------------------------------------
         await self.broadcast_event({
             "type": "device_stage_update",
@@ -109,7 +129,7 @@ class TrackingController:
             "message": "Local AI Model Extracting Faces..."
         })
 
-        # 3. Detect and crop faces locally using InsightFace SCRFD crowd detector
+        # 5. Detect and crop faces locally using InsightFace SCRFD crowd detector
         all_faces = await asyncio.to_thread(detect_faces_crowd, image_bytes)
         
         valid_faces = []
@@ -207,7 +227,8 @@ class TrackingController:
                 marked, s_name, s_roll, s_time = mark_attendance(
                     raw_identity=identity_str,
                     image_bytes=face_bytes,
-                    device_id=dev_name or dev_id
+                    device_id=dev_name or dev_id,
+                    session_id=active_session.get("id")
                 )
 
                 if marked:
@@ -351,27 +372,32 @@ class TrackingController:
             q_item["score"] = round(score, 1)
             q_item["result"] = f"✅ MATCH: {display_name} ({roll_no}) — {score:.1f}%"
 
-            # Persist attendance
-            is_new = mark_attendance(identity_str, dev_id, current_time_str)
-            print(f"\n[EDGE AI ATTENDANCE] 🎯 SUCCESS: {display_name} ({roll_no}) verified from {dev_name} ({dev_id}) at {current_time_str} IST (New: {is_new})\n")
+            # Persist attendance with correct argument signature & crop bytes
+            marked, s_name, s_roll, s_time = mark_attendance(
+                raw_identity=identity_str,
+                image_bytes=crop_bytes,
+                device_id=dev_name or dev_id,
+                session_id=active_session.get("id")
+            )
+            print(f"\n[EDGE AI ATTENDANCE] 🎯 SUCCESS: {s_name} ({s_roll}) verified from {dev_name} ({dev_id}) at {s_time or current_time_str} IST (Marked: {marked})\n")
 
             student_entry = {
-                "name": display_name,
-                "roll_number": roll_no,
-                "time": current_time_str,
+                "name": s_name,
+                "roll_number": s_roll,
+                "time": s_time or current_time_str,
                 "photo": f"/static/crops/{crop_filename}"
             }
             if dev_id in connected_devices:
                 if "verified_students" not in connected_devices[dev_id]:
                     connected_devices[dev_id]["verified_students"] = []
-                if not any(s.get("name") == display_name for s in connected_devices[dev_id]["verified_students"]):
+                if not any(s.get("name") == s_name for s in connected_devices[dev_id]["verified_students"]):
                     connected_devices[dev_id]["verified_students"].insert(0, student_entry)
 
             await self.broadcast_event({
                 "type": "attendance",
-                "name": display_name,
-                "roll_number": roll_no,
-                "time": current_time_str,
+                "name": s_name,
+                "roll_number": s_roll,
+                "time": s_time or current_time_str,
                 "device_id": dev_name or dev_id,
                 "photo": f"/static/crops/{crop_filename}"
             })
