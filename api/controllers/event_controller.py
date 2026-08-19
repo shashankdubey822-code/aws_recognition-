@@ -92,35 +92,74 @@ class EventController:
                 "message": f"Frame {frame_num}/{total_frames}: Found {faces_count} faces at native 4K optical density. Matching against AWS cloud vectors..."
             })
 
-            # AWS Matching Queue per photo
+            # ── UPGRADE 3: Parallel AWS Batch Calls ──────────────────────────
+            # All faces in a frame are matched simultaneously via asyncio.gather()
+            # instead of one-at-a-time. For 21 faces this is ~21× faster AWS step.
+            #
+            # Each face also has TWO separate byte streams:
+            #   face["bytes"]         → aligned+enhanced crop → sent to AWS
+            #   face["display_bytes"] → natural padded crop   → shown in gallery
+            # ─────────────────────────────────────────────────────────────────
             matched_in_this_frame = 0
             frame_crops = []
+
+            # Build pre-broadcast crop records immediately (gallery shows instantly)
+            pre_records = []
+            valid_faces = []
             for face_idx, face in enumerate(faces):
-                crop_bytes = face.get("bytes")
-                if not crop_bytes:
+                aws_bytes = face.get("bytes")        # aligned, for AWS
+                disp_bytes = face.get("display_bytes") or aws_bytes  # natural crop, for gallery
+                if not aws_bytes:
                     continue
 
-                # ── NO DISK SAVE ──
-                # Crops live ONLY in RAM and are streamed to the dashboard
-                # as base64 data URIs. Nothing is written to the filesystem.
-                crop_b64 = base64.b64encode(crop_bytes).decode("utf-8")
-                bbox = face.get("bbox", [])
-                face_crop_record = {
+                # Gallery image is the natural padded crop (display_bytes)
+                disp_b64 = base64.b64encode(disp_bytes).decode("utf-8")
+
+                record = {
                     "face_index": face_idx + 1,
                     "frame_num": frame_num,
                     "filename": filename,
-                    "crop_b64": f"data:image/jpeg;base64,{crop_b64}",
-                    "bbox": bbox,
+                    "crop_b64": f"data:image/jpeg;base64,{disp_b64}",
+                    "bbox": face.get("bbox", []),
+                    "aligned": face.get("aligned", False),
                     "matched": False,
                     "name": "Scanning...",
                     "roll": "—",
                     "confidence": 0.0
                 }
+                pre_records.append(record)
+                valid_faces.append((face_idx, aws_bytes))
 
-                # Cloud Vector Search
-                search_res = await asyncio.to_thread(search_face_on_aws, crop_bytes)
-                if isinstance(search_res, list):
-                    search_res = search_res[0] if len(search_res) > 0 else {}
+                # Broadcast crop immediately so gallery fills in real-time
+                await self.broadcast_event({
+                    "type": "event_face_crop",
+                    "event_id": event_id,
+                    "frame_index": frame_num,
+                    "face_index": face_idx + 1,
+                    "total_faces_so_far": total_faces_detected,
+                    "crop": record
+                })
+
+            # ── Parallel AWS matching for all faces in this frame ──
+            async def _match_one(idx_in_list, aws_bytes_data):
+                try:
+                    res = await asyncio.to_thread(search_face_on_aws, aws_bytes_data)
+                    if isinstance(res, list):
+                        res = res[0] if res else {}
+                    return idx_in_list, res
+                except Exception as e:
+                    print(f"[EVENT PARALLEL AWS] Face {idx_in_list} error: {e}")
+                    return idx_in_list, {}
+
+            aws_tasks = [_match_one(i, aws_b) for i, aws_b in enumerate(
+                [vf[1] for vf in valid_faces]
+            )]
+            aws_results = await asyncio.gather(*aws_tasks)
+
+            # Process AWS results and update records
+            for list_idx, search_res in aws_results:
+                record = pre_records[list_idx]
+                frame_crops.append(record)
 
                 if isinstance(search_res, dict) and search_res.get("match"):
                     matched_in_this_frame += 1
@@ -128,10 +167,10 @@ class EventController:
                     name, roll = parse_identity(raw_id)
                     conf = search_res.get("confidence", 95.0)
 
-                    face_crop_record["matched"] = True
-                    face_crop_record["name"] = name
-                    face_crop_record["roll"] = roll
-                    face_crop_record["confidence"] = round(conf, 1)
+                    record["matched"] = True
+                    record["name"] = name
+                    record["roll"] = roll
+                    record["confidence"] = round(conf, 1)
 
                     key = f"{roll}_{name}".strip("_")
                     if key not in unique_attendees:
@@ -142,23 +181,22 @@ class EventController:
                             "first_seen_frame": frame_num,
                             "seen_count": 1,
                             "verified_time": get_time_str(),
-                            "photo": face_crop_record["crop_b64"]
+                            "photo": record["crop_b64"]
                         }
                     else:
                         unique_attendees[key]["seen_count"] += 1
-                        unique_attendees[key]["confidence"] = max(unique_attendees[key]["confidence"], round(conf, 1))
+                        unique_attendees[key]["confidence"] = max(
+                            unique_attendees[key]["confidence"], round(conf, 1)
+                        )
 
-                frame_crops.append(face_crop_record)
-
-                # Broadcast each crop instantly so UI updates in real-time
-                await self.broadcast_event({
-                    "type": "event_face_crop",
-                    "event_id": event_id,
-                    "frame_index": frame_num,
-                    "face_index": face_idx + 1,
-                    "total_faces_so_far": total_faces_detected,
-                    "crop": face_crop_record
-                })
+                    # Re-broadcast with match result so gallery card updates to green
+                    await self.broadcast_event({
+                        "type": "event_face_matched",
+                        "event_id": event_id,
+                        "frame_index": frame_num,
+                        "face_index": record["face_index"],
+                        "crop": record
+                    })
 
             frame_summaries.append({
                 "frame": frame_num,
@@ -180,7 +218,7 @@ class EventController:
                 "matched_count": matched_in_this_frame,
                 "current_unique_total": len(unique_attendees),
                 "total_faces_detected_cumulative": total_faces_detected,
-                "message": f"Frame {frame_num}/{total_frames} complete ({faces_count} faces extracted, {matched_in_this_frame} matched). Total Unique Attendees So Far: {len(unique_attendees)}"
+                "message": f"Frame {frame_num}/{total_frames} complete ({faces_count} faces, {matched_in_this_frame} matched). Unique Attendees: {len(unique_attendees)}"
             })
 
         # --- 4. COMPILE EXCEL WORKBOOK REPORT ---

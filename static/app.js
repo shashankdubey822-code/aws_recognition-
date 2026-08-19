@@ -1292,54 +1292,62 @@ function connectWebSocket() {
             const crop = data.crop;
             if (!crop || !crop.crop_b64) return;
 
-            // Hide placeholder
             const placeholder = document.getElementById('event-crop-empty-placeholder');
             if (placeholder) placeholder.style.display = 'none';
-
-            // Show results panel early so crops appear during processing
             if (eventResultsPanel) eventResultsPanel.classList.remove('hidden');
             if (eventStatFaces) eventStatFaces.textContent = data.total_faces_so_far;
-
-            // Update crop counter
             const counterEl = document.getElementById('event-crop-counter');
             if (counterEl) counterEl.textContent = data.total_faces_so_far;
 
-            // Build crop card
             const gallery = document.getElementById('event-crop-gallery');
             if (!gallery) return;
 
-            const isMatched = crop.matched;
+            // Build card (starts grey/scanning — will turn green via event_face_matched)
             const card = document.createElement('div');
-            card.className = `crop-card relative group cursor-pointer rounded-xl overflow-hidden border-2 transition-all ${isMatched ? 'border-emerald-400 shadow-emerald-100 shadow-md' : 'border-slate-200 hover:border-sky-300'}`;
-            card.dataset.matched = isMatched ? '1' : '0';
-            card.title = isMatched ? `${crop.name} (${crop.roll}) — ${crop.confidence}%` : 'No match found';
+            card.id = `crop-card-f${data.frame_index}-i${data.face_index}`;
+            card.className = 'crop-card relative group cursor-pointer rounded-xl overflow-hidden border-2 border-slate-300 hover:border-sky-300 transition-all';
+            card.dataset.matched = '0';
+            card.dataset.frameIndex = data.frame_index;
+            card.dataset.faceIndex = data.face_index;
             card.innerHTML = `
                 <img src="${crop.crop_b64}" alt="Face ${data.face_index}" class="w-full aspect-square object-cover" loading="lazy" />
-                <div class="absolute bottom-0 left-0 right-0 ${isMatched ? 'bg-emerald-600' : 'bg-slate-700'} bg-opacity-90 text-white text-[9px] font-mono font-bold px-1 py-0.5 truncate">
-                    ${isMatched ? crop.name.split(' ')[0] : '?'}
+                <div class="crop-label absolute bottom-0 left-0 right-0 bg-slate-700 bg-opacity-90 text-white text-[9px] font-mono font-bold px-1 py-0.5 truncate">
+                    ${crop.aligned ? '⚡' : ''} scanning...
                 </div>
-                ${isMatched ? '<div class="absolute top-1 right-1 w-3.5 h-3.5 rounded-full bg-emerald-400 border border-white shadow-sm"></div>' : ''}
+                <div class="crop-dot absolute top-1 right-1 w-3 h-3 rounded-full bg-slate-400 border border-white shadow-sm animate-pulse"></div>
             `;
-            // Expand to large view on click
-            card.addEventListener('click', () => {
-                const modal = document.createElement('div');
-                modal.className = 'fixed inset-0 z-[999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4';
-                modal.innerHTML = `
-                    <div class="bg-white rounded-2xl shadow-2xl p-5 max-w-xs w-full flex flex-col gap-3">
-                        <img src="${crop.crop_b64}" class="w-full rounded-xl border border-slate-200 max-h-64 object-contain" />
-                        <div class="text-xs font-mono text-slate-800 font-bold">${isMatched ? crop.name : 'Unrecognized Face'}</div>
-                        ${isMatched ? `<div class="text-[11px] font-mono text-slate-500">Roll: ${crop.roll} | Confidence: ${crop.confidence}%</div>` : ''}
-                        <div class="text-[10px] font-mono text-slate-400">Frame ${data.frame_index} — Face #${data.face_index}</div>
-                        <button class="mt-1 px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-mono font-bold hover:bg-slate-200 transition" onclick="this.closest('.fixed').remove()">Close</button>
-                    </div>
-                `;
-                document.body.appendChild(modal);
-                modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
-            });
+            card.addEventListener('click', () => _openCropModal(crop, data));
             gallery.appendChild(card);
-
-            // Auto-scroll gallery to bottom
             gallery.scrollTop = gallery.scrollHeight;
+            return;
+        }
+
+        // AWS match came back — upgrade the card from grey to green live
+        if (data.type === 'event_face_matched') {
+            const crop = data.crop;
+            const cardId = `crop-card-f${data.frame_index}-i${data.face_index}`;
+            const card = document.getElementById(cardId);
+            if (card) {
+                card.className = 'crop-card relative group cursor-pointer rounded-xl overflow-hidden border-2 border-emerald-400 shadow-emerald-100 shadow-md transition-all';
+                card.dataset.matched = '1';
+                card.title = `${crop.name} (${crop.roll}) — ${crop.confidence}%`;
+                const label = card.querySelector('.crop-label');
+                if (label) {
+                    label.className = 'crop-label absolute bottom-0 left-0 right-0 bg-emerald-600 bg-opacity-95 text-white text-[9px] font-mono font-bold px-1 py-0.5 truncate';
+                    label.textContent = (crop.aligned ? '⚡ ' : '') + (crop.name || '').split(' ')[0];
+                }
+                const dot = card.querySelector('.crop-dot');
+                if (dot) {
+                    dot.className = 'crop-dot absolute top-1 right-1 w-3.5 h-3.5 rounded-full bg-emerald-400 border border-white shadow-sm';
+                }
+                // Update click modal to show match info
+                card.onclick = () => _openCropModal(crop, data);
+            }
+            // Update attendees count live
+            if (eventStatAttendees) {
+                const cur = parseInt(eventStatAttendees.textContent || '0');
+                // Will be corrected by event_completed, just increment for UX
+            }
             return;
         }
 
@@ -1807,6 +1815,30 @@ if (downloadBtn) {
         a.click();
         document.body.removeChild(a);
     });
+}
+
+// ============================================================
+// 4K Crop Modal — opens full-size crop with match details
+// ============================================================
+function _openCropModal(crop, data) {
+    const isMatched = crop.matched;
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 z-[999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4';
+    modal.innerHTML = `
+        <div class="bg-white rounded-2xl shadow-2xl p-5 max-w-xs w-full flex flex-col gap-3">
+            <img src="${crop.crop_b64}" class="w-full rounded-xl border border-slate-200 max-h-64 object-contain" />
+            <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full ${isMatched ? 'bg-emerald-500' : 'bg-slate-400'} inline-block"></span>
+                <span class="text-xs font-mono font-bold text-slate-800">${isMatched ? crop.name : 'Unrecognized Face'}</span>
+            </div>
+            ${isMatched ? `<div class="text-[11px] font-mono text-slate-500">Roll: <b>${crop.roll}</b> | Confidence: <b>${crop.confidence}%</b></div>` : ''}
+            ${crop.aligned ? '<div class="text-[10px] font-mono text-sky-500 font-bold">⚡ Affine-Aligned (SCRFD-10G)</div>' : ''}
+            <div class="text-[10px] font-mono text-slate-400">Frame ${data.frame_index ?? ''} — Face #${data.face_index ?? crop.face_index ?? ''}</div>
+            <button class="mt-1 px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-mono font-bold hover:bg-slate-200 transition" onclick="this.closest('.fixed').remove()">Close</button>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
 }
 
 // ============================================================
