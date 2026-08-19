@@ -94,10 +94,38 @@ class EventController:
 
             # AWS Matching Queue per photo
             matched_in_this_frame = 0
-            for face in faces:
+            frame_crops = []
+            for face_idx, face in enumerate(faces):
                 crop_bytes = face.get("bytes")
                 if not crop_bytes:
                     continue
+
+                # Save crop image to disk
+                crop_dir = f"static/event_photos/{event_id}/crops"
+                os.makedirs(crop_dir, exist_ok=True)
+                crop_filename = f"frame{frame_num}_face{face_idx+1}.jpg"
+                crop_path = os.path.join(crop_dir, crop_filename)
+                try:
+                    with open(crop_path, "wb") as cf:
+                        cf.write(crop_bytes)
+                except Exception:
+                    pass
+
+                # Base64 encode crop for live dashboard streaming
+                crop_b64 = base64.b64encode(crop_bytes).decode("utf-8")
+                bbox = face.get("bbox", [])
+                face_crop_record = {
+                    "face_index": face_idx + 1,
+                    "frame_num": frame_num,
+                    "filename": filename,
+                    "crop_url": f"/static/event_photos/{event_id}/crops/{crop_filename}",
+                    "crop_b64": f"data:image/jpeg;base64,{crop_b64}",
+                    "bbox": bbox,
+                    "matched": False,
+                    "name": "Scanning...",
+                    "roll": "—",
+                    "confidence": 0.0
+                }
 
                 # Cloud Vector Search
                 search_res = await asyncio.to_thread(search_face_on_aws, crop_bytes)
@@ -110,6 +138,11 @@ class EventController:
                     name, roll = parse_identity(raw_id)
                     conf = search_res.get("confidence", 95.0)
 
+                    face_crop_record["matched"] = True
+                    face_crop_record["name"] = name
+                    face_crop_record["roll"] = roll
+                    face_crop_record["confidence"] = round(conf, 1)
+
                     key = f"{roll}_{name}".strip("_")
                     if key not in unique_attendees:
                         unique_attendees[key] = {
@@ -118,18 +151,32 @@ class EventController:
                             "confidence": round(conf, 1),
                             "first_seen_frame": frame_num,
                             "seen_count": 1,
-                            "verified_time": get_time_str()
+                            "verified_time": get_time_str(),
+                            "photo": face_crop_record["crop_url"]
                         }
                     else:
                         unique_attendees[key]["seen_count"] += 1
                         unique_attendees[key]["confidence"] = max(unique_attendees[key]["confidence"], round(conf, 1))
+
+                frame_crops.append(face_crop_record)
+
+                # Broadcast each crop instantly so UI updates in real-time
+                await self.broadcast_event({
+                    "type": "event_face_crop",
+                    "event_id": event_id,
+                    "frame_index": frame_num,
+                    "face_index": face_idx + 1,
+                    "total_faces_so_far": total_faces_detected,
+                    "crop": face_crop_record
+                })
 
             frame_summaries.append({
                 "frame": frame_num,
                 "filename": filename,
                 "faces_detected": faces_count,
                 "matched_count": matched_in_this_frame,
-                "detect_time_ms": detect_time_ms
+                "detect_time_ms": detect_time_ms,
+                "crops": frame_crops
             })
 
             # Telemetry Stage 3: Frame Complete
@@ -142,6 +189,7 @@ class EventController:
                 "faces_detected": faces_count,
                 "matched_count": matched_in_this_frame,
                 "current_unique_total": len(unique_attendees),
+                "total_faces_detected_cumulative": total_faces_detected,
                 "message": f"Frame {frame_num}/{total_frames} complete ({faces_count} faces extracted, {matched_in_this_frame} matched). Total Unique Attendees So Far: {len(unique_attendees)}"
             })
 

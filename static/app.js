@@ -1227,7 +1227,75 @@ function connectWebSocket() {
         }
 
         if (data.type === 'event_frame_completed') {
-            appendEventLog(`✅ Frame ${data.frame_index}/${data.total_frames} complete (${data.faces_detected} faces extracted, ${data.matched_count} cloud verified). Total unique attendees: ${data.current_unique_total}`, 'text-emerald-300 font-bold');
+            appendEventLog(`✅ Frame ${data.frame_index}/${data.total_frames} complete (${data.faces_detected} faces, ${data.matched_count} matched). Total unique: ${data.current_unique_total}`, 'text-emerald-300 font-bold');
+            // Update live face count stat card during processing
+            if (eventStatFaces) eventStatFaces.textContent = data.total_faces_detected_cumulative ?? data.faces_detected;
+            // Add per-frame row to breakdown accordion
+            const breakdownEl = document.getElementById('event-frame-breakdown');
+            if (breakdownEl) {
+                const row = document.createElement('div');
+                row.className = 'flex items-center gap-3 py-1 border-b border-slate-100 last:border-0';
+                row.innerHTML = `<span class="font-bold text-slate-700 w-20 shrink-0">Frame ${data.frame_index}/${data.total_frames}</span><span class="text-sky-600 font-bold w-14 shrink-0">${data.faces_detected} faces</span><span class="text-emerald-600 font-bold w-16 shrink-0">${data.matched_count} matched</span><span class="text-slate-500 truncate">${data.filename || ''}</span>`;
+                breakdownEl.appendChild(row);
+                const toggleBtn = document.getElementById('toggle-frame-breakdown-btn');
+                if (toggleBtn) toggleBtn.classList.remove('hidden');
+            }
+            return;
+        }
+
+        // Real-time face crop arrived from server — add to gallery immediately
+        if (data.type === 'event_face_crop') {
+            const crop = data.crop;
+            if (!crop || !crop.crop_b64) return;
+
+            // Hide placeholder
+            const placeholder = document.getElementById('event-crop-empty-placeholder');
+            if (placeholder) placeholder.style.display = 'none';
+
+            // Show results panel early so crops appear during processing
+            if (eventResultsPanel) eventResultsPanel.classList.remove('hidden');
+            if (eventStatFaces) eventStatFaces.textContent = data.total_faces_so_far;
+
+            // Update crop counter
+            const counterEl = document.getElementById('event-crop-counter');
+            if (counterEl) counterEl.textContent = data.total_faces_so_far;
+
+            // Build crop card
+            const gallery = document.getElementById('event-crop-gallery');
+            if (!gallery) return;
+
+            const isMatched = crop.matched;
+            const card = document.createElement('div');
+            card.className = `crop-card relative group cursor-pointer rounded-xl overflow-hidden border-2 transition-all ${isMatched ? 'border-emerald-400 shadow-emerald-100 shadow-md' : 'border-slate-200 hover:border-sky-300'}`;
+            card.dataset.matched = isMatched ? '1' : '0';
+            card.title = isMatched ? `${crop.name} (${crop.roll}) — ${crop.confidence}%` : 'No match found';
+            card.innerHTML = `
+                <img src="${crop.crop_b64}" alt="Face ${data.face_index}" class="w-full aspect-square object-cover" loading="lazy" />
+                <div class="absolute bottom-0 left-0 right-0 ${isMatched ? 'bg-emerald-600' : 'bg-slate-700'} bg-opacity-90 text-white text-[9px] font-mono font-bold px-1 py-0.5 truncate">
+                    ${isMatched ? crop.name.split(' ')[0] : '?'}
+                </div>
+                ${isMatched ? '<div class="absolute top-1 right-1 w-3.5 h-3.5 rounded-full bg-emerald-400 border border-white shadow-sm"></div>' : ''}
+            `;
+            // Expand to large view on click
+            card.addEventListener('click', () => {
+                const modal = document.createElement('div');
+                modal.className = 'fixed inset-0 z-[999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4';
+                modal.innerHTML = `
+                    <div class="bg-white rounded-2xl shadow-2xl p-5 max-w-xs w-full flex flex-col gap-3">
+                        <img src="${crop.crop_b64}" class="w-full rounded-xl border border-slate-200 max-h-64 object-contain" />
+                        <div class="text-xs font-mono text-slate-800 font-bold">${isMatched ? crop.name : 'Unrecognized Face'}</div>
+                        ${isMatched ? `<div class="text-[11px] font-mono text-slate-500">Roll: ${crop.roll} | Confidence: ${crop.confidence}%</div>` : ''}
+                        <div class="text-[10px] font-mono text-slate-400">Frame ${data.frame_index} — Face #${data.face_index}</div>
+                        <button class="mt-1 px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-mono font-bold hover:bg-slate-200 transition" onclick="this.closest('.fixed').remove()">Close</button>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+                modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+            });
+            gallery.appendChild(card);
+
+            // Auto-scroll gallery to bottom
+            gallery.scrollTop = gallery.scrollHeight;
             return;
         }
 
@@ -1695,6 +1763,29 @@ if (downloadBtn) {
         a.click();
         document.body.removeChild(a);
     });
+}
+
+// ============================================================
+// 4K Crop Gallery Filter: Toggle between ALL faces and MATCHED ONLY
+// ============================================================
+let _showMatchedOnly = false;
+function toggleCropFilter() {
+    _showMatchedOnly = !_showMatchedOnly;
+    const btn = document.getElementById('event-crop-filter-btn');
+    const cards = document.querySelectorAll('.crop-card');
+    cards.forEach(card => {
+        if (_showMatchedOnly && card.dataset.matched !== '1') {
+            card.style.display = 'none';
+        } else {
+            card.style.display = '';
+        }
+    });
+    if (btn) {
+        btn.textContent = _showMatchedOnly ? '👁 SHOW ALL FACES' : '🔍 SHOW MATCHED ONLY';
+        btn.classList.toggle('bg-emerald-50', _showMatchedOnly);
+        btn.classList.toggle('border-emerald-300', _showMatchedOnly);
+        btn.classList.toggle('text-emerald-700', _showMatchedOnly);
+    }
 }
 
 connectWebSocket();

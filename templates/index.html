@@ -605,7 +605,7 @@
                 </div>
             </div>
 
-            <!-- Final Verified Attendance Ledger Panel (Hidden until scan finishes) -->
+            <!-- Final Results Panel (Hidden until scan finishes) -->
             <div id="event-results-panel" class="hidden flex flex-col gap-6">
                 
                 <!-- Stat Cards -->
@@ -615,7 +615,7 @@
                         <span id="event-stat-photos" class="text-2xl font-extrabold font-mono text-slate-900 mt-1">0</span>
                     </div>
                     <div class="glass-card p-4 rounded-2xl flex flex-col">
-                        <span class="text-[10px] font-mono font-bold text-slate-400 uppercase">👥 Total Faces Scanned</span>
+                        <span class="text-[10px] font-mono font-bold text-slate-400 uppercase">👥 Total Faces Detected</span>
                         <span id="event-stat-faces" class="text-2xl font-extrabold font-mono text-sky-600 mt-1">0</span>
                     </div>
                     <div class="glass-card p-4 rounded-2xl flex flex-col">
@@ -628,12 +628,47 @@
                     </div>
                 </div>
 
+                <!-- ===== LIVE FACE CROP GALLERY ===== -->
+                <div class="glass-panel rounded-2xl p-5 flex flex-col gap-4 shadow-sm border border-slate-200">
+                    <div class="flex items-center justify-between flex-wrap gap-2">
+                        <div>
+                            <h3 class="text-sm font-mono font-bold text-slate-900 flex items-center gap-2">
+                                <span class="w-2 h-2 rounded-full bg-sky-500 animate-pulse inline-block"></span>
+                                Live Detected Face Crops
+                            </h3>
+                            <p class="text-[11px] text-slate-500 font-mono mt-0.5">All faces cropped by SAHI 4K detector — matched faces shown in green</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="text-[10px] font-mono font-bold text-slate-500 uppercase">Total Crops:</span>
+                            <span id="event-crop-counter" class="text-lg font-extrabold font-mono text-sky-700 tabular-nums">0</span>
+                            <button id="event-crop-filter-btn" class="px-3 py-1 rounded-lg text-[10px] font-mono font-bold border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition-all" onclick="toggleCropFilter()">
+                                🔍 SHOW MATCHED ONLY
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Crop gallery grid - fills in real-time as faces are detected -->
+                    <div id="event-crop-gallery" class="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2 max-h-80 overflow-y-auto pr-1">
+                        <!-- Crops inserted here by JS -->
+                        <div id="event-crop-empty-placeholder" class="col-span-full flex flex-col items-center justify-center py-8 text-slate-400">
+                            <span class="text-3xl mb-2">🔍</span>
+                            <span class="text-xs font-mono">Waiting for face crops...</span>
+                        </div>
+                    </div>
+                    <!-- Per-frame breakdown accordion -->
+                    <div id="event-frame-breakdown" class="hidden flex flex-col gap-1.5 border-t border-slate-100 pt-3 mt-1 text-[11px] font-mono text-slate-600 max-h-36 overflow-y-auto">
+                        <!-- Per-frame rows inserted by JS -->
+                    </div>
+                    <button id="toggle-frame-breakdown-btn" class="text-[10px] font-mono font-bold text-sky-600 hover:underline self-start hidden" onclick="document.getElementById('event-frame-breakdown').classList.toggle('hidden')">
+                        ▸ Show Per-Frame Breakdown
+                    </button>
+                </div>
+
                 <!-- Deduplicated Attendance Ledger Table -->
                 <div class="glass-panel rounded-2xl p-6 flex flex-col gap-4 shadow-sm border border-slate-200">
                     <div class="flex flex-wrap justify-between items-center gap-3">
                         <div>
                             <h3 class="text-sm font-mono font-bold text-slate-900">Consolidated Unique Attendance Ledger</h3>
-                            <p class="text-xs text-slate-500 font-mono">Deduplicated across all camera angles & verified against AWS cloud vectors</p>
+                            <p class="text-xs text-slate-500 font-mono">Deduplicated across all camera angles &amp; verified against AWS cloud vectors</p>
                         </div>
                         <div class="flex items-center gap-2">
                             <a id="event-download-excel-btn" href="#" target="_blank" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-mono font-bold transition-all flex items-center gap-2 shadow-sm">
