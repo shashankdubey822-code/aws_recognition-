@@ -1212,6 +1212,50 @@ function connectWebSocket() {
             appendEventLog(`🏁 ${data.message}`, 'text-sky-400 font-bold');
             if (eventHudProgressPercent) eventHudProgressPercent.textContent = '5%';
             if (eventHudProgressBar) eventHudProgressBar.style.width = '5%';
+
+            // ── FULL SESSION RESET ──
+            // Wipe ALL data from previous scan so only current-session
+            // crops are visible. Nothing from old scans survives.
+
+            // 1. Reset crop gallery
+            const gallery = document.getElementById('event-crop-gallery');
+            if (gallery) {
+                gallery.innerHTML = `
+                    <div id="event-crop-empty-placeholder" class="col-span-full flex flex-col items-center justify-center py-8 text-slate-400">
+                        <span class="text-3xl mb-2 animate-pulse">🔍</span>
+                        <span class="text-xs font-mono">Detecting faces...</span>
+                    </div>`;
+            }
+
+            // 2. Reset crop counter
+            const cropCounter = document.getElementById('event-crop-counter');
+            if (cropCounter) cropCounter.textContent = '0';
+
+            // 3. Reset per-frame breakdown
+            const breakdown = document.getElementById('event-frame-breakdown');
+            if (breakdown) breakdown.innerHTML = '';
+            const breakdownBtn = document.getElementById('toggle-frame-breakdown-btn');
+            if (breakdownBtn) breakdownBtn.classList.add('hidden');
+
+            // 4. Reset stat cards
+            if (eventStatPhotos) eventStatPhotos.textContent = '0';
+            if (eventStatFaces) eventStatFaces.textContent = '0';
+            if (eventStatAttendees) eventStatAttendees.textContent = '0';
+
+            // 5. Reset attendees table
+            if (eventAttendeesTbody) eventAttendeesTbody.innerHTML = '';
+
+            // 6. Reset crop filter toggle
+            _showMatchedOnly = false;
+            const filterBtn = document.getElementById('event-crop-filter-btn');
+            if (filterBtn) {
+                filterBtn.textContent = '🔍 SHOW MATCHED ONLY';
+                filterBtn.classList.remove('bg-emerald-50', 'border-emerald-300', 'text-emerald-700');
+            }
+
+            // 7. Hide results panel (will re-appear when first crop arrives)
+            if (eventResultsPanel) eventResultsPanel.classList.add('hidden');
+
             return;
         }
 

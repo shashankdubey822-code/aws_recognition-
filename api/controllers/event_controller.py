@@ -100,25 +100,15 @@ class EventController:
                 if not crop_bytes:
                     continue
 
-                # Save crop image to disk
-                crop_dir = f"static/event_photos/{event_id}/crops"
-                os.makedirs(crop_dir, exist_ok=True)
-                crop_filename = f"frame{frame_num}_face{face_idx+1}.jpg"
-                crop_path = os.path.join(crop_dir, crop_filename)
-                try:
-                    with open(crop_path, "wb") as cf:
-                        cf.write(crop_bytes)
-                except Exception:
-                    pass
-
-                # Base64 encode crop for live dashboard streaming
+                # ── NO DISK SAVE ──
+                # Crops live ONLY in RAM and are streamed to the dashboard
+                # as base64 data URIs. Nothing is written to the filesystem.
                 crop_b64 = base64.b64encode(crop_bytes).decode("utf-8")
                 bbox = face.get("bbox", [])
                 face_crop_record = {
                     "face_index": face_idx + 1,
                     "frame_num": frame_num,
                     "filename": filename,
-                    "crop_url": f"/static/event_photos/{event_id}/crops/{crop_filename}",
                     "crop_b64": f"data:image/jpeg;base64,{crop_b64}",
                     "bbox": bbox,
                     "matched": False,
@@ -152,7 +142,7 @@ class EventController:
                             "first_seen_frame": frame_num,
                             "seen_count": 1,
                             "verified_time": get_time_str(),
-                            "photo": face_crop_record["crop_url"]
+                            "photo": face_crop_record["crop_b64"]
                         }
                     else:
                         unique_attendees[key]["seen_count"] += 1
