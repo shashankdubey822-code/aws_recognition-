@@ -24,6 +24,7 @@ from core.state import (
 )
 from api.websocket import websocket_endpoint, end_active_session, broadcast_json
 from api.controllers.event_controller import EventController
+from api.controllers import bulk_register_controller as bulk_ctrl
 from services.aws_client import ensure_collection_exists, delete_all_faces
 from services.email_service import generate_session_excel, get_latest_email_diagnostics
 
@@ -285,6 +286,107 @@ async def wipe_faces(request: Request):
         except: pass
         return {"success": True, "message": "Full system reset complete."}
     return {"success": False, "message": message}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BULK SMART REGISTRATION — 5-Step Pipeline Endpoints
+# ADDITIVE ONLY — never deletes existing registered students
+# ─────────────────────────────────────────────────────────────────────────────
+
+class BulkClusterRequest(BaseModel):
+    session_id: str
+
+class BulkRemoveCropRequest(BaseModel):
+    session_id: str
+    cluster_id: str
+    crop_id: str
+
+class BulkPushPersonRequest(BaseModel):
+    session_id: str
+    cluster_id: str
+    person_name: str
+    person_roll: str = ""
+
+class BulkPushAllRequest(BaseModel):
+    session_id: str
+    labels: list  # [{cluster_id, person_name, person_roll}]
+
+
+@app.post("/api/bulk/crop")
+async def bulk_crop_images(
+    photos: list[UploadFile] = File(...)
+):
+    """
+    STEP 2 — Crop all faces from uploaded 4K auditorium photos.
+    Returns session_id + all detected face crops as base64.
+    Does NOT write to AWS or SQLite.
+    """
+    if not photos:
+        raise HTTPException(status_code=400, detail="No photos uploaded.")
+
+    file_payloads = []
+    for p in photos:
+        content = await p.read()
+        file_payloads.append({"filename": p.filename, "bytes": content})
+
+    result = await bulk_ctrl.crop_images(file_payloads)
+    return result
+
+
+@app.post("/api/bulk/cluster")
+async def bulk_cluster_faces(req: BulkClusterRequest):
+    """
+    STEP 3 — Group all crops from the session into person clusters.
+    Uses AWS Rekognition compare_faces() — read-only, no writes to collection.
+    Returns clusters labeled Unknown #1, Unknown #2, ...
+    """
+    result = await bulk_ctrl.cluster_faces(req.session_id)
+    return result
+
+
+@app.post("/api/bulk/remove_crop")
+async def bulk_remove_crop(req: BulkRemoveCropRequest):
+    """
+    STEP 3b — Remove a specific crop from a cluster (user correction).
+    If user thinks algorithm merged two different people, they can remove wrong crops.
+    """
+    result = bulk_ctrl.remove_crop_from_cluster(
+        req.session_id, req.cluster_id, req.crop_id
+    )
+    return result
+
+
+@app.post("/api/bulk/push_person")
+async def bulk_push_person(req: BulkPushPersonRequest):
+    """
+    STEP 5 — Push ONE labeled person cluster to AWS Rekognition.
+    Pushes top-3 best quality crops as face vectors.
+    Saves to SQLite registered_faces table.
+    User must click — never automatic.
+    SAFE: uses index_faces() (append only), never deletes existing data.
+    """
+    result = await bulk_ctrl.push_person_to_aws(
+        req.session_id, req.cluster_id, req.person_name, req.person_roll
+    )
+    return result
+
+
+@app.post("/api/bulk/push_all")
+async def bulk_push_all(req: BulkPushAllRequest):
+    """
+    STEP 5b — Push ALL labeled clusters to AWS Rekognition at once.
+    Skips clusters with empty names or already pushed.
+    User must click — never automatic.
+    """
+    result = await bulk_ctrl.push_all_to_aws(req.session_id, req.labels)
+    return result
+
+
+@app.post("/api/bulk/clear_session")
+async def bulk_clear_session(req: BulkClusterRequest):
+    """Free server-side memory for a completed bulk session."""
+    bulk_ctrl.clear_session(req.session_id)
+    return {"success": True}
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=7860)

@@ -115,6 +115,43 @@
         .toast.error { border-left: 4px solid #dc2626; }
         .toast.warning { border-left: 4px solid #d97706; }
         .toast.info { border-left: 4px solid #0284c7; }
+
+        /* Bulk Registration Step Indicators */
+        .bulk-step-indicator {
+            display: flex; flex-direction: column; align-items: center; gap: 2px;
+            flex-shrink: 0; cursor: default;
+        }
+        .bulk-step-indicator .step-num {
+            width: 28px; height: 28px; border-radius: 50%;
+            background: #e2e8f0; color: #64748b;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 11px; font-weight: 800; font-family: monospace;
+            transition: all 0.3s;
+        }
+        .bulk-step-indicator .step-label {
+            font-size: 9px; font-weight: 700; font-family: monospace;
+            color: #94a3b8; white-space: nowrap;
+        }
+        .bulk-step-indicator.active .step-num { background: #0ea5e9; color: white; }
+        .bulk-step-indicator.active .step-label { color: #0ea5e9; }
+        .bulk-step-indicator.done .step-num { background: #10b981; color: white; }
+        .bulk-step-indicator.done .step-label { color: #10b981; }
+
+        /* Bulk cluster card thumbnails */
+        .bulk-cluster-thumb {
+            position: relative; width: 56px; height: 56px; flex-shrink: 0;
+            border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0;
+        }
+        .bulk-cluster-thumb img { width: 100%; height: 100%; object-fit: cover; }
+        .bulk-cluster-thumb .remove-crop-btn {
+            position: absolute; top: 1px; right: 1px;
+            width: 16px; height: 16px; border-radius: 50%;
+            background: rgba(220,38,38,0.85); color: white;
+            font-size: 9px; font-weight: 900; border: none; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; transition: opacity 0.15s;
+        }
+        .bulk-cluster-thumb:hover .remove-crop-btn { opacity: 1; }
     </style>
 </head>
 <body class="p-3 sm:p-6 flex flex-col items-center min-h-screen relative font-sans antialiased">
@@ -155,6 +192,9 @@
                 </button>
                 <button id="tab-events-btn" class="px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5">
                     📸 4K Event Scanner
+                </button>
+                <button id="tab-bulk-btn" class="px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5">
+                    🧠 Bulk Register
                 </button>
             </div>
 
@@ -975,13 +1015,153 @@
                     </button>
                 </div>
             </div>
-            <div class="aspect-video w-full rounded-2xl overflow-hidden bg-slate-900 flex items-center justify-center">
-                <img id="lightbox-img" src="" alt="Raw Frame Full" class="w-full h-full object-contain">
+    <!-- ================= VIEW 4: BULK SMART REGISTRATION ================= -->
+    <div id="view-bulk" class="hidden flex flex-col gap-6">
+
+        <!-- Header -->
+        <div class="glass-panel rounded-2xl p-5">
+            <div class="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                    <h2 class="text-lg font-mono font-bold text-slate-800">🧠 Bulk Smart Registration</h2>
+                    <p class="text-xs font-mono text-slate-500 mt-0.5">Upload 4–5 auditorium photos → auto-crop all faces → cluster same person → label → push to AWS</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span id="bulk-session-badge" class="hidden px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-sky-100 text-sky-700 border border-sky-200">SESSION ACTIVE</span>
+                    <button id="bulk-reset-btn" class="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 text-xs font-mono font-bold hover:bg-slate-200 transition border border-slate-200">↺ RESET</button>
+                </div>
             </div>
+
+            <!-- Step Progress Indicator -->
+            <div class="flex items-center gap-0 mt-4 overflow-x-auto pb-1">
+                <div class="bulk-step-indicator active" data-step="1">
+                    <span class="step-num">1</span><span class="step-label">Upload</span>
+                </div>
+                <div class="h-px w-6 bg-slate-200 flex-shrink-0"></div>
+                <div class="bulk-step-indicator" data-step="2">
+                    <span class="step-num">2</span><span class="step-label">Crop Faces</span>
+                </div>
+                <div class="h-px w-6 bg-slate-200 flex-shrink-0"></div>
+                <div class="bulk-step-indicator" data-step="3">
+                    <span class="step-num">3</span><span class="step-label">Cluster</span>
+                </div>
+                <div class="h-px w-6 bg-slate-200 flex-shrink-0"></div>
+                <div class="bulk-step-indicator" data-step="4">
+                    <span class="step-num">4</span><span class="step-label">Label</span>
+                </div>
+                <div class="h-px w-6 bg-slate-200 flex-shrink-0"></div>
+                <div class="bulk-step-indicator" data-step="5">
+                    <span class="step-num">5</span><span class="step-label">Push to AWS</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- STEP 1: Upload Zone -->
+        <div id="bulk-step1-panel" class="glass-panel rounded-2xl p-5 flex flex-col gap-4">
+            <div class="flex items-center gap-2">
+                <span class="w-6 h-6 rounded-full bg-sky-500 text-white text-[11px] font-mono font-bold flex items-center justify-center">1</span>
+                <span class="text-sm font-mono font-bold text-slate-700">Upload Auditorium Photos (4K recommended)</span>
+            </div>
+
+            <!-- Drop Zone -->
+            <div id="bulk-dropzone"
+                 class="border-2 border-dashed border-slate-300 rounded-xl p-8 flex flex-col items-center gap-3 cursor-pointer hover:border-sky-400 hover:bg-sky-50/40 transition-all"
+                 onclick="document.getElementById('bulk-file-input').click()">
+                <div class="text-4xl">🖼️</div>
+                <p class="text-sm font-mono font-bold text-slate-600">Click or drag & drop 4K photos here</p>
+                <p class="text-xs font-mono text-slate-400">Supports JPG, PNG, WEBP — up to 10 photos</p>
+                <div id="bulk-file-count" class="hidden px-3 py-1 rounded-full bg-sky-100 text-sky-700 text-xs font-mono font-bold border border-sky-200"></div>
+            </div>
+            <input type="file" id="bulk-file-input" multiple accept="image/*" class="hidden">
+
+            <!-- Photo Preview Strip -->
+            <div id="bulk-photo-preview" class="hidden flex gap-2 overflow-x-auto pb-1"></div>
+
+            <!-- CROP BUTTON -->
+            <button id="bulk-crop-btn" disabled
+                    class="w-full py-3 rounded-xl bg-sky-500 text-white font-mono font-bold text-sm hover:bg-sky-600 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                ✂️ CROP ALL FACES
+            </button>
+            <div id="bulk-crop-status" class="hidden text-xs font-mono text-sky-700 text-center animate-pulse">🔄 Detecting & cropping faces from all images...</div>
+        </div>
+
+        <!-- STEP 2: Crop Gallery (hidden until crops arrive) -->
+        <div id="bulk-step2-panel" class="hidden glass-panel rounded-2xl p-5 flex flex-col gap-4">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+                <div class="flex items-center gap-2">
+                    <span class="w-6 h-6 rounded-full bg-sky-500 text-white text-[11px] font-mono font-bold flex items-center justify-center">2</span>
+                    <span class="text-sm font-mono font-bold text-slate-700">All Detected Face Crops</span>
+                    <span id="bulk-crop-count-badge" class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10px] font-mono font-bold border border-slate-200">0 crops</span>
+                </div>
+            </div>
+
+            <!-- Crop Grid -->
+            <div id="bulk-crop-grid" class="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2 max-h-64 overflow-y-auto pr-1"></div>
+
+            <!-- CLUSTER BUTTON -->
+            <button id="bulk-cluster-btn"
+                    class="w-full py-3 rounded-xl bg-violet-500 text-white font-mono font-bold text-sm hover:bg-violet-600 transition flex items-center justify-center gap-2">
+                🔍 FIND SAME FACES (Cluster by Person)
+            </button>
+            <div id="bulk-cluster-status" class="hidden text-xs font-mono text-violet-700 text-center animate-pulse">🔄 Comparing faces across images... this may take 30–60 seconds.</div>
+        </div>
+
+        <!-- STEP 3 & 4: Cluster Boxes + Labeling (hidden until clusters arrive) -->
+        <div id="bulk-step3-panel" class="hidden glass-panel rounded-2xl p-5 flex flex-col gap-4">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+                <div class="flex items-center gap-2">
+                    <span class="w-6 h-6 rounded-full bg-violet-500 text-white text-[11px] font-mono font-bold flex items-center justify-center">3</span>
+                    <span class="text-sm font-mono font-bold text-slate-700">Person Clusters — Label Each Person</span>
+                    <span id="bulk-cluster-count-badge" class="px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 text-[10px] font-mono font-bold border border-violet-200">0 persons</span>
+                </div>
+                <p class="text-xs font-mono text-slate-400">Remove wrong face photos using ✕ · Then type each person's name</p>
+            </div>
+
+            <!-- Cluster Cards Container -->
+            <div id="bulk-cluster-container" class="flex flex-col gap-4 max-h-[600px] overflow-y-auto pr-1"></div>
+
+            <!-- GENERATE VECTORS BUTTON -->
+            <button id="bulk-generate-btn"
+                    class="w-full py-3 rounded-xl bg-emerald-500 text-white font-mono font-bold text-sm hover:bg-emerald-600 transition flex items-center justify-center gap-2">
+                ⚡ GENERATE VECTORS FOR ALL LABELED PERSONS
+            </button>
+            <p class="text-[10px] font-mono text-slate-400 text-center">Only persons with a name filled in will be processed. Empty = skipped.</p>
+        </div>
+
+        <!-- STEP 5: Results + Per-Person Push Buttons -->
+        <div id="bulk-step5-panel" class="hidden glass-panel rounded-2xl p-5 flex flex-col gap-4">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+                <div class="flex items-center gap-2">
+                    <span class="w-6 h-6 rounded-full bg-emerald-500 text-white text-[11px] font-mono font-bold flex items-center justify-center">5</span>
+                    <span class="text-sm font-mono font-bold text-slate-700">Vector Generation Results — Push to AWS Database</span>
+                </div>
+            </div>
+
+            <!-- Results List -->
+            <div id="bulk-results-list" class="flex flex-col gap-3 max-h-[500px] overflow-y-auto pr-1"></div>
+
+            <!-- PUSH ALL Button -->
+            <div class="border-t border-slate-200 pt-4 flex flex-col gap-2">
+                <button id="bulk-push-all-btn"
+                        class="w-full py-3 rounded-xl bg-rose-500 text-white font-mono font-bold text-sm hover:bg-rose-600 transition flex items-center justify-center gap-2">
+                    🚀 PUSH ALL TO AWS DATABASE
+                </button>
+                <p class="text-[10px] font-mono text-slate-400 text-center">⚠️ This registers all persons above to AWS. Already pushed ones will be skipped. This does NOT delete any existing student.</p>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ============= LIGHTBOX (existing, untouched) ============= -->
+    <div id="lightbox-overlay" class="hidden fixed inset-0 z-[998] bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center p-4">
+        <div class="flex gap-3 mb-4">
+            <button onclick="document.getElementById('lightbox-overlay').classList.add('hidden')" class="px-4 py-2 rounded-xl bg-white/10 text-white text-xs font-mono font-bold hover:bg-white/20 transition">✕ Close</button>
+        </div>
+        <div class="aspect-video w-full rounded-2xl overflow-hidden bg-slate-900 flex items-center justify-center">
+            <img id="lightbox-img" src="" alt="Raw Frame Full" class="w-full h-full object-contain">
         </div>
     </div>
 
     <!-- Main Logic Script (Cache Busted) -->
-    <script src="/static/app.js?v=20260818_05"></script>
+    <script src="/static/app.js?v=20260821_01"></script>
 </body>
 </html>

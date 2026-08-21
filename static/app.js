@@ -269,33 +269,46 @@ function resetDiagChecklist() {
     if (regDiagLog) regDiagLog.innerHTML = '<div>[SYSTEM] Diagnostic engine standby. Ready for scan.</div>';
 }
 
-// --- TOP TABS SWITCHER (LIGHT GLASS 3-WAY) ---
+// --- TOP TABS SWITCHER (LIGHT GLASS 4-WAY) ---
 function switchMainTab(activeTab) {
-    // Reset all tabs
-    if (tabDashboardBtn) tabDashboardBtn.className = "px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all";
-    if (tabDevicesBtn) tabDevicesBtn.className = "px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5";
-    if (tabEventsBtn) tabEventsBtn.className = "px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5";
+    const tabBtnBase = "px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all flex items-center gap-1.5";
+    const tabBtnActive = "px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-white text-sky-700 shadow-sm border border-slate-200/80 flex items-center gap-1.5";
 
+    // Reset all tab buttons
+    if (tabDashboardBtn) tabDashboardBtn.className = "px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-slate-600 hover:text-slate-900 transition-all";
+    if (tabDevicesBtn) tabDevicesBtn.className = tabBtnBase;
+    if (tabEventsBtn) tabEventsBtn.className = tabBtnBase;
+    const tabBulkBtn = document.getElementById('tab-bulk-btn');
+    if (tabBulkBtn) tabBulkBtn.className = tabBtnBase;
+
+    // Hide all views
     if (viewDashboard) viewDashboard.classList.add('hidden');
     if (viewDevices) viewDevices.classList.add('hidden');
     if (viewEvents) viewEvents.classList.add('hidden');
+    const viewBulk = document.getElementById('view-bulk');
+    if (viewBulk) viewBulk.classList.add('hidden');
 
     if (activeTab === 'DASHBOARD') {
         if (tabDashboardBtn) tabDashboardBtn.className = "px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-white text-sky-700 shadow-sm border border-slate-200/80";
         if (viewDashboard) viewDashboard.classList.remove('hidden');
     } else if (activeTab === 'DEVICES') {
-        if (tabDevicesBtn) tabDevicesBtn.className = "px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-white text-sky-700 shadow-sm border border-slate-200/80 flex items-center gap-1.5";
+        if (tabDevicesBtn) tabDevicesBtn.className = tabBtnActive;
         if (viewDevices) viewDevices.classList.remove('hidden');
         renderDevicesView();
     } else if (activeTab === 'EVENTS') {
         if (tabEventsBtn) tabEventsBtn.className = "px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-white text-indigo-700 shadow-sm border border-slate-200/80 flex items-center gap-1.5";
         if (viewEvents) viewEvents.classList.remove('hidden');
+    } else if (activeTab === 'BULK') {
+        if (tabBulkBtn) tabBulkBtn.className = "px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-white text-emerald-700 shadow-sm border border-slate-200/80 flex items-center gap-1.5";
+        if (viewBulk) viewBulk.classList.remove('hidden');
     }
 }
 
 if (tabDashboardBtn) tabDashboardBtn.addEventListener('click', () => switchMainTab('DASHBOARD'));
 if (tabDevicesBtn) tabDevicesBtn.addEventListener('click', () => switchMainTab('DEVICES'));
 if (tabEventsBtn) tabEventsBtn.addEventListener('click', () => switchMainTab('EVENTS'));
+// Bulk tab wired up after DOM ready (see bulk section below)
+
 
 // --- 4K EVENT SCANNER CONTROLLER ---
 function appendEventLog(msg, colorClass = "text-slate-300") {
@@ -1862,6 +1875,569 @@ function toggleCropFilter() {
         btn.classList.toggle('border-emerald-300', _showMatchedOnly);
         btn.classList.toggle('text-emerald-700', _showMatchedOnly);
     }
+}
+
+// ============================================================
+// BULK SMART REGISTRATION CONTROLLER (5-STEP PIPELINE)
+// ============================================================
+
+let bulkSessionId = null;
+let bulkSelectedFiles = [];
+let bulkCrops = [];
+let bulkClusters = [];
+let bulkLabels = []; // [{cluster_id, person_name, person_roll, representative_b64}]
+
+const tabBulkBtn = document.getElementById('tab-bulk-btn');
+if (tabBulkBtn) {
+    tabBulkBtn.addEventListener('click', () => switchMainTab('BULK'));
+}
+
+const bulkResetBtn = document.getElementById('bulk-reset-btn');
+const bulkSessionBadge = document.getElementById('bulk-session-badge');
+const bulkDropzone = document.getElementById('bulk-dropzone');
+const bulkFileInput = document.getElementById('bulk-file-input');
+const bulkFileCount = document.getElementById('bulk-file-count');
+const bulkPhotoPreview = document.getElementById('bulk-photo-preview');
+const bulkCropBtn = document.getElementById('bulk-crop-btn');
+const bulkCropStatus = document.getElementById('bulk-crop-status');
+
+const bulkStep1Panel = document.getElementById('bulk-step1-panel');
+const bulkStep2Panel = document.getElementById('bulk-step2-panel');
+const bulkStep3Panel = document.getElementById('bulk-step3-panel');
+const bulkStep5Panel = document.getElementById('bulk-step5-panel');
+
+const bulkCropCountBadge = document.getElementById('bulk-crop-count-badge');
+const bulkCropGrid = document.getElementById('bulk-crop-grid');
+const bulkClusterBtn = document.getElementById('bulk-cluster-btn');
+const bulkClusterStatus = document.getElementById('bulk-cluster-status');
+
+const bulkClusterCountBadge = document.getElementById('bulk-cluster-count-badge');
+const bulkClusterContainer = document.getElementById('bulk-cluster-container');
+const bulkGenerateBtn = document.getElementById('bulk-generate-btn');
+
+const bulkResultsList = document.getElementById('bulk-results-list');
+const bulkPushAllBtn = document.getElementById('bulk-push-all-btn');
+
+function setBulkStep(stepNum) {
+    document.querySelectorAll('.bulk-step-indicator').forEach(ind => {
+        const s = parseInt(ind.dataset.step);
+        ind.classList.remove('active', 'done');
+        if (s < stepNum) {
+            ind.classList.add('done');
+        } else if (s === stepNum) {
+            ind.classList.add('active');
+        }
+    });
+
+    if (bulkStep1Panel) bulkStep1Panel.classList.toggle('hidden', stepNum !== 1);
+    if (bulkStep2Panel) bulkStep2Panel.classList.toggle('hidden', stepNum !== 2);
+    if (bulkStep3Panel) bulkStep3Panel.classList.toggle('hidden', stepNum !== 3 && stepNum !== 4);
+    if (bulkStep5Panel) bulkStep5Panel.classList.toggle('hidden', stepNum !== 5);
+}
+
+// --- Step 1: File selection & Dropzone ---
+if (bulkDropzone && bulkFileInput) {
+    ['dragenter', 'dragover'].forEach(evt => {
+        bulkDropzone.addEventListener(evt, (e) => {
+            e.preventDefault();
+            bulkDropzone.classList.add('border-sky-500', 'bg-sky-50/70');
+        });
+    });
+
+    ['dragleave', 'drop'].forEach(evt => {
+        bulkDropzone.addEventListener(evt, (e) => {
+            e.preventDefault();
+            bulkDropzone.classList.remove('border-sky-500', 'bg-sky-50/70');
+        });
+    });
+
+    bulkDropzone.addEventListener('drop', (e) => {
+        if (e.dataTransfer && e.dataTransfer.files) {
+            handleBulkFilesSelected(e.dataTransfer.files);
+        }
+    });
+
+    bulkFileInput.addEventListener('change', (e) => {
+        if (e.target.files) {
+            handleBulkFilesSelected(e.target.files);
+        }
+    });
+}
+
+function handleBulkFilesSelected(files) {
+    if (!files || files.length === 0) return;
+    bulkSelectedFiles = Array.from(files);
+
+    if (bulkFileCount) {
+        bulkFileCount.textContent = `${bulkSelectedFiles.length} photo(s) selected`;
+        bulkFileCount.classList.remove('hidden');
+    }
+
+    if (bulkPhotoPreview) {
+        bulkPhotoPreview.innerHTML = '';
+        bulkPhotoPreview.classList.remove('hidden');
+        bulkSelectedFiles.forEach((f, idx) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const imgWrap = document.createElement('div');
+                imgWrap.className = 'w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 border border-slate-200 shadow-sm bg-slate-100';
+                imgWrap.innerHTML = `<img src="${e.target.result}" class="w-full h-full object-cover" title="${f.name}">`;
+                bulkPhotoPreview.appendChild(imgWrap);
+            };
+            reader.readAsDataURL(f);
+        });
+    }
+
+    if (bulkCropBtn) {
+        bulkCropBtn.disabled = false;
+    }
+}
+
+// --- Step 2: Crop All Faces ---
+if (bulkCropBtn) {
+    bulkCropBtn.addEventListener('click', async () => {
+        if (!bulkSelectedFiles || bulkSelectedFiles.length === 0) {
+            showToast("Please select 4K auditorium photos first.", "error");
+            return;
+        }
+
+        const formData = new FormData();
+        bulkSelectedFiles.forEach(f => {
+            formData.append("photos", f);
+        });
+
+        bulkCropBtn.disabled = true;
+        if (bulkCropStatus) bulkCropStatus.classList.remove('hidden');
+
+        try {
+            const resp = await fetch('/api/bulk/crop', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await resp.json();
+
+            if (!data.success) {
+                showToast(`Crop error: ${data.error || data.detail || 'Failed to crop'}`, 'error');
+                bulkCropBtn.disabled = false;
+                if (bulkCropStatus) bulkCropStatus.classList.add('hidden');
+                return;
+            }
+
+            bulkSessionId = data.session_id;
+            bulkCrops = data.crops || [];
+
+            if (bulkSessionBadge) {
+                bulkSessionBadge.textContent = `SESSION: ${bulkSessionId}`;
+                bulkSessionBadge.classList.remove('hidden');
+            }
+
+            if (bulkCropCountBadge) {
+                bulkCropCountBadge.textContent = `${bulkCrops.length} crops from ${data.total_images} photos`;
+            }
+
+            // Render Crop Grid
+            if (bulkCropGrid) {
+                bulkCropGrid.innerHTML = '';
+                bulkCrops.forEach((crop, idx) => {
+                    const card = document.createElement('div');
+                    card.className = 'relative aspect-square rounded-xl overflow-hidden border border-slate-200 group bg-slate-100 cursor-pointer shadow-sm hover:border-sky-400 transition';
+                    card.innerHTML = `
+                        <img src="${crop.crop_b64}" class="w-full h-full object-cover" loading="lazy">
+                        <div class="absolute bottom-0 inset-x-0 bg-black/60 text-[8px] font-mono text-white text-center py-0.5 truncate">
+                            #${idx + 1}
+                        </div>
+                    `;
+                    card.addEventListener('click', () => {
+                        _openCropModal({ crop_b64: crop.crop_b64, name: `Crop #${idx + 1} (${crop.source_image})`, matched: false }, { frame_index: crop.image_index + 1, face_index: crop.face_index + 1 });
+                    });
+                    bulkCropGrid.appendChild(card);
+                });
+            }
+
+            showToast(`✅ Extracted ${bulkCrops.length} faces at 4K resolution!`, 'success');
+            setBulkStep(2);
+
+        } catch (err) {
+            showToast(`Network error during face cropping: ${err.message}`, 'error');
+            bulkCropBtn.disabled = false;
+        } finally {
+            if (bulkCropStatus) bulkCropStatus.classList.add('hidden');
+        }
+    });
+}
+
+// --- Step 3: Cluster Faces ---
+if (bulkClusterBtn) {
+    bulkClusterBtn.addEventListener('click', async () => {
+        if (!bulkSessionId) {
+            showToast("No active session found. Please re-upload.", "error");
+            return;
+        }
+
+        bulkClusterBtn.disabled = true;
+        if (bulkClusterStatus) bulkClusterStatus.classList.remove('hidden');
+
+        try {
+            const resp = await fetch('/api/bulk/cluster', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: bulkSessionId })
+            });
+            const data = await resp.json();
+
+            if (!data.success) {
+                showToast(`Clustering error: ${data.error || 'Failed to cluster faces'}`, 'error');
+                bulkClusterBtn.disabled = false;
+                if (bulkClusterStatus) bulkClusterStatus.classList.add('hidden');
+                return;
+            }
+
+            bulkClusters = data.clusters || [];
+
+            if (bulkClusterCountBadge) {
+                bulkClusterCountBadge.textContent = `${bulkClusters.length} unique persons detected`;
+            }
+
+            renderClusterBoxes();
+            showToast(`✅ Clustered into ${bulkClusters.length} unique persons!`, 'success');
+            setBulkStep(3);
+
+        } catch (err) {
+            showToast(`Error during clustering: ${err.message}`, 'error');
+            bulkClusterBtn.disabled = false;
+        } finally {
+            if (bulkClusterStatus) bulkClusterStatus.classList.add('hidden');
+        }
+    });
+}
+
+function renderClusterBoxes() {
+    if (!bulkClusterContainer) return;
+    bulkClusterContainer.innerHTML = '';
+
+    bulkClusters.forEach((cluster, cidx) => {
+        const card = document.createElement('div');
+        card.id = `cluster-card-${cluster.cluster_id}`;
+        card.className = 'glass-panel rounded-2xl p-4 border border-slate-200/90 shadow-sm flex flex-col md:flex-row gap-4 items-start md:items-center justify-between';
+
+        // Thumbnails Strip
+        let thumbsHtml = '';
+        (cluster.crops || []).forEach(crop => {
+            thumbsHtml += `
+                <div class="bulk-cluster-thumb" id="thumb-${crop.crop_id}">
+                    <img src="${crop.crop_b64}" alt="Face crop">
+                    <button class="remove-crop-btn" title="Remove wrong face from this cluster" onclick="removeCropFromClusterUI('${cluster.cluster_id}', '${crop.crop_id}')">✕</button>
+                </div>
+            `;
+        });
+
+        card.innerHTML = `
+            <div class="flex flex-col gap-2 flex-1 w-full">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <span class="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-violet-100 text-violet-800 border border-violet-200">${cluster.label}</span>
+                        <span class="text-[11px] font-mono text-slate-500" id="crop-count-${cluster.cluster_id}">${cluster.crops.length} photos</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 overflow-x-auto py-1 max-w-full" id="thumbs-strip-${cluster.cluster_id}">
+                    ${thumbsHtml}
+                </div>
+            </div>
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto">
+                <input type="text"
+                       placeholder="Student / Faculty Name *"
+                       data-cluster-id="${cluster.cluster_id}"
+                       class="bulk-name-input px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:bg-white transition min-w-[180px]"
+                       value="${cluster.person_name || ''}">
+                <input type="text"
+                       placeholder="Roll Number (opt)"
+                       data-cluster-id="${cluster.cluster_id}"
+                       class="bulk-roll-input px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:bg-white transition min-w-[130px]"
+                       value="${cluster.person_roll || ''}">
+            </div>
+        `;
+
+        bulkClusterContainer.appendChild(card);
+    });
+}
+
+// Remove crop from a cluster (User correction)
+window.removeCropFromClusterUI = async function(clusterId, cropId) {
+    if (!bulkSessionId) return;
+
+    try {
+        const resp = await fetch('/api/bulk/remove_crop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: bulkSessionId,
+                cluster_id: clusterId,
+                crop_id: cropId
+            })
+        });
+        const res = await resp.json();
+
+        if (res.success) {
+            const thumbEl = document.getElementById(`thumb-${cropId}`);
+            if (thumbEl) thumbEl.remove();
+
+            const countEl = document.getElementById(`crop-count-${clusterId}`);
+            if (countEl) countEl.textContent = `${res.remaining} photos`;
+
+            if (res.remaining === 0) {
+                const cardEl = document.getElementById(`cluster-card-${clusterId}`);
+                if (cardEl) cardEl.remove();
+            }
+            showToast("Removed photo from cluster.", "info");
+        } else {
+            showToast(`Failed to remove: ${res.error}`, "error");
+        }
+    } catch (err) {
+        showToast(`Remove error: ${err.message}`, "error");
+    }
+};
+
+// --- Step 4 -> 5: Generate Vectors & Prepare Push ---
+if (bulkGenerateBtn) {
+    bulkGenerateBtn.addEventListener('click', () => {
+        const nameInputs = document.querySelectorAll('.bulk-name-input');
+        const rollInputs = document.querySelectorAll('.bulk-roll-input');
+
+        bulkLabels = [];
+        let filledCount = 0;
+
+        nameInputs.forEach(nInput => {
+            const cId = nInput.dataset.clusterId;
+            const name = nInput.value.trim();
+            let roll = "";
+
+            rollInputs.forEach(rInput => {
+                if (rInput.dataset.clusterId === cId) {
+                    roll = rInput.value.trim();
+                }
+            });
+
+            const clusterObj = bulkClusters.find(c => c.cluster_id === cId);
+            const repB64 = (clusterObj && clusterObj.crops && clusterObj.crops.length > 0) ? clusterObj.crops[0].crop_b64 : "";
+
+            if (name) {
+                filledCount++;
+                bulkLabels.push({
+                    cluster_id: cId,
+                    person_name: name,
+                    person_roll: roll,
+                    crop_count: clusterObj ? clusterObj.crops.length : 0,
+                    representative_b64: repB64,
+                    pushed: false
+                });
+            }
+        });
+
+        if (filledCount === 0) {
+            showToast("Please enter at least one name before generating vectors.", "warning");
+            return;
+        }
+
+        renderStep5Results();
+        setBulkStep(5);
+        showToast(`⚡ Prepared vectors for ${filledCount} labeled persons. Ready to push to AWS!`, "success");
+    });
+}
+
+function renderStep5Results() {
+    if (!bulkResultsList) return;
+    bulkResultsList.innerHTML = '';
+
+    bulkLabels.forEach((item, idx) => {
+        const row = document.createElement('div');
+        row.id = `bulk-result-row-${item.cluster_id}`;
+        row.className = 'glass-panel rounded-xl p-3 border border-slate-200 shadow-sm flex items-center justify-between gap-3 flex-wrap';
+
+        row.innerHTML = `
+            <div class="flex items-center gap-3">
+                <div class="w-12 h-12 rounded-lg overflow-hidden border border-slate-200 bg-slate-100 flex-shrink-0">
+                    <img src="${item.representative_b64}" class="w-full h-full object-cover">
+                </div>
+                <div class="flex flex-col">
+                    <span class="text-xs font-mono font-bold text-slate-800">${item.person_name}</span>
+                    <span class="text-[10px] font-mono text-slate-500">Roll: ${item.person_roll || '—'} · ${item.crop_count} angle vector(s)</span>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <span id="status-badge-${item.cluster_id}" class="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-sky-50 text-sky-700 border border-sky-200">
+                    ⚡ Vector Ready
+                </span>
+                <button id="push-btn-${item.cluster_id}"
+                        onclick="pushSinglePerson('${item.cluster_id}')"
+                        class="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-mono font-bold transition shadow-sm">
+                    PUSH TO DB
+                </button>
+            </div>
+        `;
+        bulkResultsList.appendChild(row);
+    });
+}
+
+// Push Single Person to AWS & DB
+window.pushSinglePerson = async function(clusterId) {
+    if (!bulkSessionId) return;
+    const item = bulkLabels.find(l => l.cluster_id === clusterId);
+    if (!item) return;
+
+    const btn = document.getElementById(`push-btn-${clusterId}`);
+    const badge = document.getElementById(`status-badge-${clusterId}`);
+    if (btn) btn.disabled = true;
+    if (badge) {
+        badge.className = "px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-amber-50 text-amber-700 border border-amber-200 animate-pulse";
+        badge.textContent = "⏳ Indexing in AWS...";
+    }
+
+    try {
+        const resp = await fetch('/api/bulk/push_person', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: bulkSessionId,
+                cluster_id: clusterId,
+                person_name: item.person_name,
+                person_roll: item.person_roll
+            })
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            item.pushed = true;
+            if (badge) {
+                badge.className = "px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-emerald-100 text-emerald-800 border border-emerald-300";
+                badge.textContent = `✅ Registered (${data.crops_pushed} vectors)`;
+            }
+            if (btn) {
+                btn.textContent = "REGISTERED ✓";
+                btn.className = "px-3 py-1.5 rounded-xl bg-slate-100 text-slate-400 text-xs font-mono font-bold cursor-not-allowed";
+            }
+            showToast(data.message || `Registered ${item.person_name} successfully!`, "success");
+        } else {
+            if (badge) {
+                badge.className = "px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-rose-50 text-rose-700 border border-rose-200";
+                badge.textContent = "❌ Failed";
+            }
+            if (btn) btn.disabled = false;
+            showToast(`Registration failed: ${data.error}`, "error");
+        }
+    } catch (err) {
+        showToast(`Network error: ${err.message}`, "error");
+        if (btn) btn.disabled = false;
+    }
+};
+
+// Push All Labeled Persons to AWS & DB
+if (bulkPushAllBtn) {
+    bulkPushAllBtn.addEventListener('click', async () => {
+        if (!bulkSessionId || !bulkLabels || bulkLabels.length === 0) {
+            showToast("No labeled persons to push.", "warning");
+            return;
+        }
+
+        const toPush = bulkLabels.filter(l => !l.pushed && l.person_name.trim());
+        if (toPush.length === 0) {
+            showToast("All labeled persons have already been registered!", "info");
+            return;
+        }
+
+        bulkPushAllBtn.disabled = true;
+        bulkPushAllBtn.innerHTML = "⏳ Pushing All to AWS Database...";
+
+        try {
+            const resp = await fetch('/api/bulk/push_all', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id: bulkSessionId,
+                    labels: toPush.map(p => ({
+                        cluster_id: p.cluster_id,
+                        person_name: p.person_name,
+                        person_roll: p.person_roll
+                    }))
+                })
+            });
+            const data = await resp.json();
+
+            if (data.success) {
+                (data.results || []).forEach(res => {
+                    const cId = res.cluster_id;
+                    const item = bulkLabels.find(l => l.cluster_id === cId);
+                    const btn = document.getElementById(`push-btn-${cId}`);
+                    const badge = document.getElementById(`status-badge-${cId}`);
+
+                    if (res.success) {
+                        if (item) item.pushed = true;
+                        if (badge) {
+                            badge.className = "px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-emerald-100 text-emerald-800 border border-emerald-300";
+                            badge.textContent = `✅ Registered (${res.crops_pushed} vectors)`;
+                        }
+                        if (btn) {
+                            btn.textContent = "REGISTERED ✓";
+                            btn.className = "px-3 py-1.5 rounded-xl bg-slate-100 text-slate-400 text-xs font-mono font-bold cursor-not-allowed";
+                            btn.disabled = true;
+                        }
+                    } else if (!res.skipped) {
+                        if (badge) {
+                            badge.className = "px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-rose-50 text-rose-700 border border-rose-200";
+                            badge.textContent = "❌ Failed";
+                        }
+                    }
+                });
+
+                showToast(`🎉 Bulk Push Complete: ${data.pushed} registered, ${data.failed} failed.`, "success");
+            } else {
+                showToast(`Bulk push failed: ${data.error}`, "error");
+            }
+        } catch (err) {
+            showToast(`Bulk push error: ${err.message}`, "error");
+        } finally {
+            bulkPushAllBtn.disabled = false;
+            bulkPushAllBtn.innerHTML = "🚀 PUSH ALL TO AWS DATABASE";
+        }
+    });
+}
+
+// Reset Pipeline
+if (bulkResetBtn) {
+    bulkResetBtn.addEventListener('click', async () => {
+        if (bulkSessionId) {
+            try {
+                await fetch('/api/bulk/clear_session', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: bulkSessionId })
+                });
+            } catch (_) {}
+        }
+
+        bulkSessionId = null;
+        bulkSelectedFiles = [];
+        bulkCrops = [];
+        bulkClusters = [];
+        bulkLabels = [];
+
+        if (bulkFileInput) bulkFileInput.value = '';
+        if (bulkFileCount) {
+            bulkFileCount.textContent = '';
+            bulkFileCount.classList.add('hidden');
+        }
+        if (bulkPhotoPreview) {
+            bulkPhotoPreview.innerHTML = '';
+            bulkPhotoPreview.classList.add('hidden');
+        }
+        if (bulkCropBtn) bulkCropBtn.disabled = true;
+        if (bulkSessionBadge) bulkSessionBadge.classList.add('hidden');
+        if (bulkCropGrid) bulkCropGrid.innerHTML = '';
+        if (bulkClusterContainer) bulkClusterContainer.innerHTML = '';
+        if (bulkResultsList) bulkResultsList.innerHTML = '';
+
+        setBulkStep(1);
+        showToast("Bulk Registration session reset.", "info");
+    });
 }
 
 connectWebSocket();
