@@ -463,45 +463,46 @@ class SCRFDFaceDetector:
                     print(f"[SCRFD v3] Geometry REJECTED box=({int(bx1)},{int(by1)},{int(bx2)},{int(by2)}) conf={scores[i][0]:.3f}")
                     continue
 
-                # ── Upgrade 2: Affine-Aligned Crop ──
-                # Produces a geometrically corrected, upright face at 112×112
-                # for maximum AWS Rekognition match accuracy
-                aligned_face = self._align_face(img, kps_5pt, output_size=112)
-
-                if aligned_face is not None and aligned_face.size > 0:
-                    # Scale up to 224×224 for AWS (better detail retention)
-                    aws_input = cv2.resize(aligned_face, (224, 224), interpolation=cv2.INTER_LANCZOS4)
-                    aws_input = self._enhance_crop(aws_input, 224, 224)
-                else:
-                    # Fallback: padded bounding-box crop if alignment fails
-                    pad_x = box_w * 0.22
-                    pad_y = box_h * 0.26
-                    crop_x1 = max(0, int(bx1 - pad_x))
-                    crop_y1 = max(0, int(by1 - pad_y))
-                    crop_x2 = min(img_w, int(bx2 + pad_x))
-                    crop_y2 = min(img_h, int(by2 + pad_y))
-                    raw_crop = img[crop_y1:crop_y2, crop_x1:crop_x2]
-                    if raw_crop.size == 0:
-                        continue
-                    aws_input = self._enhance_crop(raw_crop, box_w, box_h)
-
-                # Also extract a larger padded crop for display in the gallery
+                # ── Crop at FULL NATIVE 4K RESOLUTION ──────────────────────
+                # Display crop: sliced directly from the original 4K matrix.
+                # NO resize. NO downscale. Exact pixels as in the source image.
                 pad_x = box_w * 0.22
                 pad_y = box_h * 0.26
                 disp_x1 = max(0, int(bx1 - pad_x))
                 disp_y1 = max(0, int(by1 - pad_y))
                 disp_x2 = min(img_w, int(bx2 + pad_x))
                 disp_y2 = min(img_h, int(by2 + pad_y))
+
+                # NumPy array slice — zero pixel loss, exact coordinates from 4K image
                 display_crop = img[disp_y1:disp_y2, disp_x1:disp_x2]
                 if display_crop.size == 0:
-                    display_crop = aws_input
+                    continue
 
-                # Encode display crop for the gallery (full context, easier for human to read)
-                _, disp_buf = cv2.imencode('.jpg', display_crop, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+                # Encode display crop at quality=100 — maximum JPEG fidelity for gallery
+                _, disp_buf = cv2.imencode(
+                    '.jpg', display_crop,
+                    [int(cv2.IMWRITE_JPEG_QUALITY), 100]   # 100 = max, no generation loss
+                )
                 display_bytes = disp_buf.tobytes()
 
-                # Encode AWS input crop (aligned, enhanced) for Rekognition
-                _, aws_buf = cv2.imencode('.jpg', aws_input, [int(cv2.IMWRITE_JPEG_QUALITY), 96])
+                # ── AWS Rekognition input crop ──────────────────────────────
+                # Send the SAME full-res padded crop to AWS.
+                # Previously: img → 112px aligned → upscale 224px (double degradation)
+                # Now:        img → padded crop at native res → affine align at native size
+                aligned_face = self._align_face(img, kps_5pt, output_size=max(112, int(box_h)))
+
+                if aligned_face is not None and aligned_face.size > 0:
+                    # Use the affine-aligned face at its native computed size (no forced resize)
+                    aws_input = self._enhance_crop(aligned_face, aligned_face.shape[1], aligned_face.shape[0])
+                else:
+                    # Fallback: direct padded crop from 4K image — still full resolution
+                    aws_input = self._enhance_crop(display_crop, int(box_w), int(box_h))
+
+                # Encode AWS crop at quality=100
+                _, aws_buf = cv2.imencode(
+                    '.jpg', aws_input,
+                    [int(cv2.IMWRITE_JPEG_QUALITY), 100]
+                )
                 aws_bytes = aws_buf.tobytes()
 
                 rel_box = {
